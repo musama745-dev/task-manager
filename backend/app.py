@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for, flash, session, jsonify, send_from_directory
+from flask import Flask, render_template_string, request, redirect, url_for, flash, session, jsonify, send_from_directory, g
 import sqlite3
 import hashlib
 import bcrypt
@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'task_manager_secret_key_12345'
+app.secret_key = os.environ.get('SECRET_KEY', 'task_manager_secret_key_12345')
 
 UPLOAD_FOLDER = '/data/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'txt', 'xlsx', 'pptx'}
@@ -28,6 +28,15 @@ def get_db():
     conn = sqlite3.connect('/data/task_manager.db')
     conn.row_factory = sqlite3.Row
     return conn
+
+def is_owner_or_admin(conn, board_id):
+    board = conn.execute('SELECT * FROM boards WHERE id = ?', (board_id,)).fetchone()
+    if not board:
+        return None
+    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    if board['owner_id'] == session['user_id'] or (user and user['role'] == 'admin'):
+        return board
+    return None
 
 def init_db():
     conn = get_db()
@@ -182,12 +191,26 @@ def log_request():
         if not username:
             username = session.get('username')
         conn = sqlite3.connect('/data/task_manager.db')
-        conn.execute('INSERT INTO request_logs (method, path, ip, status, username) VALUES (?, ?, ?, ?, ?)',
+        cursor = conn.execute('INSERT INTO request_logs (method, path, ip, status, username) VALUES (?, ?, ?, ?, ?)',
                      (request.method, request.path, request.remote_addr, 'pending', username))
+        g.log_id = cursor.lastrowid
         conn.commit()
         conn.close()
     except Exception:
         pass
+
+@app.after_request
+def update_log_status(response):
+    log_id = getattr(g, 'log_id', None)
+    if log_id:
+        try:
+            conn = sqlite3.connect('/data/task_manager.db')
+            conn.execute('UPDATE request_logs SET status = ? WHERE id = ?', (str(response.status_code), log_id))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+    return response
 
 @app.route('/api/requests', methods=['GET'])
 def api_requests():
@@ -248,6 +271,9 @@ def boards_page():
             .modal-content button:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }
             .modal-close { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: #999; transition: 0.3s; }
             .modal-close:hover { color: #333; }
+            .card-btn { background: rgba(255,255,255,0.8); border: none; border-radius: 8px; cursor: pointer; font-size: 13px; padding: 4px 8px; transition: 0.2s; }
+            .card-btn:hover { background: white; transform: scale(1.05); }
+            .card-btn.del:hover { background: #fee2e2; }
         </style>
     </head>
     <body>
@@ -269,8 +295,15 @@ def boards_page():
             <div class="boards-grid">
                 {% for board in boards %}
                 <a href="/board/{{ board['id'] }}" class="board-card">
-                    <h3>{{ board['name'] }}</h3>
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <h3>{{ board['name'] }}</h3>
+                        <div style="display:flex;gap:6px;">
+                            <button class="card-btn" onclick="event.preventDefault();event.stopPropagation();editBoard({{ board['id'] }})" title="Edit">✏️</button>
+                            <button class="card-btn del" onclick="event.preventDefault();event.stopPropagation();deleteBoard({{ board['id'] }})" title="Delete">🗑️</button>
+                        </div>
+                    </div>
                     <p>{{ board['description'] or 'No description' }}</p>
+                    <small style="color:#999;">Created: {{ board['created_at'][:10] }}</small>
                 </a>
                 {% endfor %}
                 <div class="add-board-btn" onclick="openAddBoardModal()">
@@ -298,6 +331,21 @@ def boards_page():
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name: name, description: document.getElementById('boardDesc').value.trim()})
             }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function editBoard(boardId) {
+            const name = prompt('Board name:');
+            if(!name || !name.trim()) return;
+            const desc = prompt('Description:');
+            fetch('/api/edit_board', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({board_id: boardId, name: name.trim(), description: desc})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteBoard(boardId) {
+            if(!confirm('Delete this board and all its lists/tasks?')) return;
+            fetch('/api/delete_board/' + boardId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
         }
         </script>
     </body>
@@ -384,6 +432,19 @@ def board_view(board_id):
             .header h1 { font-size: 28px; font-weight: 700; color: #333; display: flex; align-items: center; gap: 10px; }
             .btn-back { padding: 10px 20px; background: white; color: #333; text-decoration: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-weight: 500; }
             .btn-back:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.1); transform: translateY(-2px); }
+            .header-actions { display: flex; gap: 10px; align-items: center; }
+            .btn-sm { padding: 8px 14px; background: white; color: #333; border: none; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.3s; font-family: 'Poppins', sans-serif; text-decoration: none; }
+            .btn-sm:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.12); }
+            .btn-danger { background: #fee2e2; color: #dc2626; }
+            .task-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+            .mini-btn { background: none; border: none; color: #5e6c84; cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 6px; transition: 0.2s; font-family: 'Poppins', sans-serif; }
+            .mini-btn:hover { background: #f0f2f5; color: #172b4d; }
+            .mini-btn.del:hover { background: #fee2e2; color: #dc2626; }
+            .label-add-row { display: flex; gap: 6px; margin-top: 6px; }
+            .label-add-row select { flex: 1; padding: 5px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; font-family: 'Poppins', sans-serif; }
+            .label-add-row button { padding: 5px 10px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: 'Poppins', sans-serif; }
+            .del-list { background: none; border: none; cursor: pointer; font-size: 14px; color: #5e6c84; padding: 2px 6px; border-radius: 6px; transition: 0.2s; }
+            .del-list:hover { background: #fee2e2; color: #dc2626; }
             .board { display: flex; gap: 20px; overflow-x: auto; padding: 10px 0 30px 0; min-height: 400px; }
             .list-column { background: #ebecf0; border-radius: 16px; padding: 15px; min-width: 300px; max-width: 300px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
             .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 5px; }
@@ -416,14 +477,21 @@ def board_view(board_id):
         <div class="container">
             <div class="header">
                 <h1>📋 {{ board['name'] }}</h1>
-                <a href="/boards" class="btn-back">← Back to Boards</a>
+                <div class="header-actions">
+                    <button class="btn-sm" onclick="editBoard()">✏️ Edit</button>
+                    <button class="btn-sm btn-danger" onclick="deleteBoard()">🗑️ Delete</button>
+                    <a href="/boards" class="btn-back">← Back to Boards</a>
+                </div>
             </div>
             <div class="board">
                 {% for lst in lists %}
                 <div class="list-column" data-list-id="{{ lst['id'] }}">
                     <div class="list-header">
                         <h3>{{ lst['name'] }}</h3>
-                        <span class="task-count">{{ tasks|selectattr('list_id', 'equalto', lst['id'])|list|length }}</span>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="task-count">{{ tasks|selectattr('list_id', 'equalto', lst['id'])|list|length }}</span>
+                            <button class="del-list" onclick="deleteList({{ lst['id'] }})" title="Delete list">🗑️</button>
+                        </div>
                     </div>
                     <div>
                         {% for task in tasks if task['list_id'] == lst['id'] %}
@@ -434,8 +502,25 @@ def board_view(board_id):
                             <!-- Labels -->
                             <div class="labels-container" style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;">
                                 {% for label in labels_by_task[task['id']] %}
-                                <span style="background:{{ label['color'] }};padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:white;">{{ label['name'] }}</span>
+                                <span style="background:{{ label['color'] }};padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:white;">{{ label['name'] }} <a href="#" onclick="removeLabel({{ task['id'] }}, {{ label['id'] }});return false;" style="color:white;text-decoration:none;margin-left:2px;">✕</a></span>
                                 {% endfor %}
+                            </div>
+
+                            <!-- Add label -->
+                            <div class="label-add-row">
+                                <select id="labelSelect_{{ task['id'] }}">
+                                    <option value="">Add label...</option>
+                                    {% for label in all_labels %}
+                                    <option value="{{ label['id'] }}">{{ label['name'] }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button onclick="addLabel({{ task['id'] }})">Add</button>
+                            </div>
+
+                            <!-- Card actions -->
+                            <div class="task-actions">
+                                <button class="mini-btn" onclick="editTask({{ task['id'] }})">✏️ Edit</button>
+                                <button class="mini-btn del" onclick="deleteTask({{ task['id'] }})">🗑️ Delete</button>
                             </div>
 
                             <!-- Checklists -->
@@ -608,6 +693,47 @@ def board_view(board_id):
             fetch('/api/delete_attachment/' + attId, { method: 'DELETE' })
             .then(res => res.json()).then(data => { if(data.success) location.reload(); });
         }
+
+        // Board functions
+        function editBoard() {
+            const name = prompt('Board name:', document.querySelector('.header h1').textContent.replace('📋','').trim());
+            if(!name) return;
+            const desc = prompt('Description:', '');
+            fetch('/api/edit_board', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({board_id: {{ board['id'] }}, name: name.trim(), description: desc})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteBoard() {
+            if(!confirm('Delete this board and all its lists/tasks?')) return;
+            fetch('/api/delete_board/{{ board['id'] }}', { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) window.location = '/boards'; else alert('Error: ' + data.error); });
+        }
+
+        // List functions
+        function deleteList(listId) {
+            if(!confirm('Delete this list and all its tasks?')) return;
+            fetch('/api/delete_list/' + listId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+
+        // Task functions
+        function editTask(taskId) {
+            const title = prompt('Task title:');
+            if(!title || !title.trim()) return;
+            const desc = prompt('Description:');
+            fetch('/api/edit_task', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, title: title.trim(), description: desc})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteTask(taskId) {
+            if(!confirm('Delete this task?')) return;
+            fetch('/api/delete_task/' + taskId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
         </script>
     </body>
     </html>
@@ -623,6 +749,7 @@ def add_list():
     name = data.get('name', '').strip()
     if not board_id or not name: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
+    if not is_owner_or_admin(conn, board_id): return jsonify({'error': 'Board not found'}), 404
     pos = conn.execute('SELECT MAX(position) as max FROM board_lists WHERE board_id = ?', (board_id,)).fetchone()['max'] or 0
     conn.execute('INSERT INTO board_lists (board_id, name, position) VALUES (?, ?, ?)', (board_id, name, pos + 1))
     conn.commit()
@@ -637,15 +764,16 @@ def add_card():
     title = data.get('title', '').strip()
     if not list_id or not title: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
-    board = conn.execute('SELECT board_id FROM board_lists WHERE id = ?', (list_id,)).fetchone()
-    if not board: return jsonify({'error': 'List not found'}), 404
+    lst = conn.execute('SELECT * FROM board_lists WHERE id = ?', (list_id,)).fetchone()
+    if not lst: return jsonify({'error': 'List not found'}), 404
+    if not is_owner_or_admin(conn, lst['board_id']): return jsonify({'error': 'Board not found'}), 404
     pos = conn.execute('SELECT MAX(position) as max FROM tasks WHERE list_id = ?', (list_id,)).fetchone()['max'] or 0
     cursor = conn.execute('INSERT INTO tasks (board_id, list_id, user_id, title, description, position) VALUES (?, ?, ?, ?, ?, ?)', 
-                 (board['board_id'], list_id, session['user_id'], title, data.get('description'), pos + 1))
+                 (lst['board_id'], list_id, session['user_id'], title, data.get('description'), pos + 1))
     task_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'task_id': task_id})
 
 @app.route('/api/move_task', methods=['POST'])
 def move_task():
@@ -655,8 +783,11 @@ def move_task():
     new_list_id = data.get('list_id')
     if not task_id or not new_list_id: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
-    board = conn.execute('SELECT board_id FROM tasks WHERE id = ?', (task_id,)).fetchone()
-    if not board: return jsonify({'error': 'Task not found'}), 404
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    if not task: return jsonify({'error': 'Task not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
+    new_list = conn.execute('SELECT * FROM board_lists WHERE id = ?', (new_list_id,)).fetchone()
+    if not new_list: return jsonify({'error': 'List not found'}), 404
     pos = conn.execute('SELECT MAX(position) as max FROM tasks WHERE list_id = ?', (new_list_id,)).fetchone()['max'] or 0
     conn.execute('UPDATE tasks SET list_id = ?, position = ? WHERE id = ?', (new_list_id, pos + 1, task_id))
     conn.commit()
@@ -726,8 +857,7 @@ def edit_task():
     conn = get_db()
     task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
     if not task: return jsonify({'error': 'Task not found'}), 404
-    board = conn.execute('SELECT * FROM boards WHERE id = ? AND owner_id = ?', (task['board_id'], session['user_id'])).fetchone()
-    if not board: return jsonify({'error': 'Board not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
     conn.execute('UPDATE tasks SET title = ?, description = ? WHERE id = ?', (title, data.get('description', task['description']), task_id))
     conn.commit()
     conn.close()
@@ -739,8 +869,7 @@ def delete_task(task_id):
     conn = get_db()
     task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
     if not task: return jsonify({'error': 'Task not found'}), 404
-    board = conn.execute('SELECT * FROM boards WHERE id = ? AND owner_id = ?', (task['board_id'], session['user_id'])).fetchone()
-    if not board: return jsonify({'error': 'Board not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
     conn.execute('DELETE FROM task_labels WHERE task_id = ?', (task_id,))
     conn.execute('DELETE FROM checklists WHERE task_id = ?', (task_id,))
     conn.execute('DELETE FROM attachments WHERE task_id = ?', (task_id,))
@@ -758,6 +887,9 @@ def add_checklist():
     item = data.get('item', '').strip()
     if not task_id or not item: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    if not task: return jsonify({'error': 'Task not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
     conn.execute('INSERT INTO checklists (task_id, item) VALUES (?, ?)', (task_id, item))
     conn.commit()
     conn.close()
@@ -771,6 +903,10 @@ def toggle_checklist():
     checked = data.get('checked') == 'true'
     if not item_id: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
+    item = conn.execute('SELECT * FROM checklists WHERE id = ?', (item_id,)).fetchone()
+    if not item: return jsonify({'error': 'Checklist item not found'}), 404
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (item['task_id'],)).fetchone()
+    if task and not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
     conn.execute('UPDATE checklists SET checked = ? WHERE id = ?', (1 if checked else 0, item_id))
     conn.commit()
     conn.close()
@@ -785,7 +921,12 @@ def add_label():
     label_id = data.get('label_id')
     if not task_id or not label_id: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
-    conn.execute('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)', (task_id, label_id))
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    if not task: return jsonify({'error': 'Task not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
+    existing = conn.execute('SELECT * FROM task_labels WHERE task_id = ? AND label_id = ?', (task_id, label_id)).fetchone()
+    if not existing:
+        conn.execute('INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)', (task_id, label_id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -798,6 +939,9 @@ def remove_label():
     label_id = data.get('label_id')
     if not task_id or not label_id: return jsonify({'error': 'Invalid data'}), 400
     conn = get_db()
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    if not task: return jsonify({'error': 'Task not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
     conn.execute('DELETE FROM task_labels WHERE task_id = ? AND label_id = ?', (task_id, label_id))
     conn.commit()
     conn.close()
@@ -811,6 +955,11 @@ def upload_file(task_id):
     file = request.files['file']
     if file.filename == '': return jsonify({'error': 'No file selected'}), 400
     if not allowed_file(file.filename): return jsonify({'error': 'File type not allowed'}), 400
+    conn = get_db()
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+    if not task: return jsonify({'error': 'Task not found'}), 404
+    if not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
+    conn.close()
     filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
@@ -836,7 +985,10 @@ def delete_attachment(att_id):
     conn = get_db()
     att = conn.execute('SELECT * FROM attachments WHERE id = ?', (att_id,)).fetchone()
     if not att: return jsonify({'error': 'Attachment not found'}), 404
-    os.remove(att['filepath'])
+    task = conn.execute('SELECT * FROM tasks WHERE id = ?', (att['task_id'],)).fetchone()
+    if task and not is_owner_or_admin(conn, task['board_id']): return jsonify({'error': 'Board not found'}), 404
+    if os.path.exists(att['filepath']):
+        os.remove(att['filepath'])
     conn.execute('DELETE FROM attachments WHERE id = ?', (att_id,))
     conn.commit()
     conn.close()
@@ -876,7 +1028,8 @@ def register():
             existing = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
             if existing: flash('Username already taken!', 'error')
             else:
-                conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashlib.sha256(password.encode()).hexdigest()))
+                hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashed))
                 conn.commit()
                 flash('Account created! Please login.', 'success')
             conn.close()
