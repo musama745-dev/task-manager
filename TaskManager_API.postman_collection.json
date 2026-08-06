@@ -1,0 +1,368 @@
+{
+  "info": {
+    "name": "Task Manager API (Docker)",
+    "description": "Task Manager app Docker ke saath. Pehle login karo (session cookie automatically set hogi), phir baaki requests chalengi.\n\nBase URL variable: http://127.0.0.1:8080 (nginx) ya http://127.0.0.1:5000 (backend direct)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "REGISTER - naya user banao",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "student1", "description": "Username" },
+                { "key": "password", "value": "test1234", "description": "Password (min 4 chars)" },
+                { "key": "confirm_password", "value": "test1234", "description": "Confirm password" }
+              ]
+            },
+            "url": "{{base_url}}/register"
+          }
+        },
+        {
+          "name": "LOGIN - session chahiye baaki ke liye",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "admin", "description": "Username" },
+                { "key": "password", "value": "admin123", "description": "Password" }
+              ]
+            },
+            "url": "{{base_url}}/login"
+          }
+        },
+        {
+          "name": "LOGOUT",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Boards",
+      "item": [
+        {
+          "name": "GET - Boards page (list dekhna)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/boards"
+          }
+        },
+        {
+          "name": "POST - Create Board (JSON body)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"My New Board\",\n    \"description\": \"Ye board Postman se bana\"\n}"
+            },
+            "url": "{{base_url}}/api/create_board"
+          }
+        },
+        {
+          "name": "GET - Board view (list_id ke saath)",
+          "request": {
+            "method": "GET",
+            "description": "URL me <board_id> ko apne board ki id se badlo. Admin login pe board id 1 hai.",
+            "url": "{{base_url}}/board/1"
+          }
+        },
+        {
+          "name": "GET - Saare Boards (JSON API)",
+          "request": {
+            "method": "GET",
+            "description": "Browser me jo board banao, usse yahan dekho. Sab boards clean JSON me milenge.",
+            "url": "{{base_url}}/api/boards"
+          }
+        },
+        {
+          "name": "GET - Ek Board ka detail (lists + tasks)",
+          "request": {
+            "method": "GET",
+            "description": "Ek board ka poora detail — lists aur tasks ke saath.",
+            "url": "{{base_url}}/api/boards/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Lists & Cards",
+      "item": [
+        {
+          "name": "POST - Add List",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"board_id\": 1,\n    \"name\": \"To Do\"\n}"
+            },
+            "url": "{{base_url}}/api/add_list"
+          }
+        },
+        {
+          "name": "POST - Add Card (board ke list me)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"list_id\": 1,\n    \"title\": \"Complete project\",\n    \"description\": \"Docker deployment karna hai\"\n}"
+            },
+            "url": "{{base_url}}/api/add_card"
+          }
+        },
+        {
+          "name": "POST - Move Task (drag-drop API)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"task_id\": 1,\n    \"list_id\": 2\n}"
+            },
+            "url": "{{base_url}}/api/move_task"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Checklists",
+      "item": [
+        {
+          "name": "POST - Add Checklist item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"task_id\": 1,\n    \"item\": \"Ek step complete karo\"\n}"
+            },
+            "url": "{{base_url}}/api/add_checklist"
+          }
+        },
+        {
+          "name": "POST - Toggle Checklist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"item_id\": 1,\n    \"checked\": \"true\"\n}"
+            },
+            "url": "{{base_url}}/api/toggle_checklist"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Labels",
+      "item": [
+        {
+          "name": "POST - Add Label to task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"task_id\": 1,\n    \"label_id\": 1\n}"
+            },
+            "description": "label_id: 1=Urgent, 2=High Priority, 3=Medium, 4=Low, 5=Feature, 6=Bug",
+            "url": "{{base_url}}/api/add_label"
+          }
+        },
+        {
+          "name": "POST - Remove Label",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"task_id\": 1,\n    \"label_id\": 1\n}"
+            },
+            "url": "{{base_url}}/api/remove_label"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Attachments",
+      "item": [
+        {
+          "name": "POST - Upload file (multipart)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/your/file.txt",
+                  "description": "Body -> form-data -> file type select karo"
+                }
+              ]
+            },
+            "url": "{{base_url}}/upload/1"
+          }
+        },
+        {
+          "name": "GET - Download attachment",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/download/1"
+          }
+        },
+        {
+          "name": "DELETE - Delete attachment",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/delete_attachment/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Delete & Edit (Naye Features)",
+      "item": [
+        {
+          "name": "POST - Edit Board",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"board_id\": 1,\n    \"name\": \"Updated Board Name\",\n    \"description\": \"Naya description\"\n}"
+            },
+            "url": "{{base_url}}/api/edit_board"
+          }
+        },
+        {
+          "name": "DELETE - Delete Board",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/delete_board/1"
+          }
+        },
+        {
+          "name": "DELETE - Delete List",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/delete_list/1"
+          }
+        },
+        {
+          "name": "POST - Edit Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"task_id\": 1,\n    \"title\": \"Updated Task Title\",\n    \"description\": \"Naya description\"\n}"
+            },
+            "url": "{{base_url}}/api/edit_task"
+          }
+        },
+        {
+          "name": "DELETE - Delete Task",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/delete_task/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Request Logs (Sir ke requests yahan dikhenge)",
+      "description": "Jab sir browser se app kholta hai (login, boards, board banana waghera), wo request automatically log hoti hai. Ye request chalao → wahi logs JSON me dikhenge.",
+      "item": [
+        {
+          "name": "GET - Saare Incoming Requests (Live Logs)",
+          "request": {
+            "method": "GET",
+            "description": "Sir ke browser ke saare requests (login, boards, create_board, etc.) yahan JSON me dikhenge. Pehle LOGIN chalao, phir ye request. Sir jab kuch kare to ise dobara chalao — naye logs dikhenge.",
+            "url": "{{base_url}}/api/requests"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8080"
+    }
+  ]
+}

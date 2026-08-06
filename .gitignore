@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Docker
+*.log
+
+# App data (DB contains user data - excluded for privacy)
+data/
+backend/*.db
+
+# Session cookies / local files
+cookies.txt
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
