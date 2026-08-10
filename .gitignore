@@ -12,6 +12,14 @@ env/
 # App data (DB contains user data - excluded for privacy)
 data/
 backend/*.db
+*.db
+
+# Postman local
+.postman/
+postman/
+
+# Uploads
+uploads/
 
 # Session cookies / local files
 cookies.txt
