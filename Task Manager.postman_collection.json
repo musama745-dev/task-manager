@@ -1,0 +1,379 @@
+{
+  "info": {
+    "name": "Task Manager API",
+    "description": "Task Manager app ke sabhi API endpoints. Pehle {{base_url}} variable ko apne app ke URL par set karo (Vercel: https://tumhara-app.vercel.app ya local: http://localhost:5000).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://YOUR-APP.vercel.app",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "testuser", "type": "text" },
+                { "key": "email", "value": "testuser@gmail.com", "type": "text" },
+                { "key": "password", "value": "pass1234", "type": "text" },
+                { "key": "confirm_password", "value": "pass1234", "type": "text" }
+              ]
+            },
+            "url": "{{base_url}}/register"
+          }
+        },
+        {
+          "name": "Login (cookie set karta hai)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "admin", "type": "text" },
+                { "key": "password", "value": "admin123", "type": "text" }
+              ]
+            },
+            "url": "{{base_url}}/login"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Boards",
+      "item": [
+        {
+          "name": "All boards (GET)",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/api/boards" }
+        },
+        {
+          "name": "Board detail (lists + tasks)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/boards/1"
+          }
+        },
+        {
+          "name": "Create board",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Work Tasks\",\n  \"description\": \"Office ke kaam\"\n}"
+            },
+            "url": "{{base_url}}/api/create_board"
+          }
+        },
+        {
+          "name": "Edit board",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"board_id\": 1,\n  \"name\": \"Work Tasks v2\",\n  \"description\": \"Updated description\"\n}"
+            },
+            "url": "{{base_url}}/api/edit_board"
+          }
+        },
+        {
+          "name": "Delete board",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/api/delete_board/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lists",
+      "item": [
+        {
+          "name": "Add list",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"board_id\": 1,\n  \"name\": \"To Do\"\n}"
+            },
+            "url": "{{base_url}}/api/add_list"
+          }
+        },
+        {
+          "name": "Delete list",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/api/delete_list/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cards / Tasks",
+      "item": [
+        {
+          "name": "Add card",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"list_id\": 1,\n  \"title\": \"Project report likhna\",\n  \"description\": \"Deadline Friday\"\n}"
+            },
+            "url": "{{base_url}}/api/add_card"
+          }
+        },
+        {
+          "name": "Edit task",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"title\": \"Project report submit\",\n  \"description\": \"Final version\"\n}"
+            },
+            "url": "{{base_url}}/api/edit_task"
+          }
+        },
+        {
+          "name": "Move task to another list",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"list_id\": 2\n}"
+            },
+            "url": "{{base_url}}/api/move_task"
+          }
+        },
+        {
+          "name": "Toggle complete",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/toggle_complete/1"
+          }
+        },
+        {
+          "name": "Set due date",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"due_date\": \"2026-08-15\"\n}"
+            },
+            "url": "{{base_url}}/api/set_due_date"
+          }
+        },
+        {
+          "name": "Set priority (low/medium/high)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"priority\": \"high\"\n}"
+            },
+            "url": "{{base_url}}/api/set_priority"
+          }
+        },
+        {
+          "name": "Delete task",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/api/delete_task/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Checklists",
+      "item": [
+        {
+          "name": "Add checklist item",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"item\": \"Intro likhna\"\n}"
+            },
+            "url": "{{base_url}}/api/add_checklist"
+          }
+        },
+        {
+          "name": "Toggle checklist item",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"item_id\": 1,\n  \"checked\": true\n}"
+            },
+            "url": "{{base_url}}/api/toggle_checklist"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Labels",
+      "item": [
+        {
+          "name": "Create label",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Important\",\n  \"color\": \"#ea4335\"\n}"
+            },
+            "url": "{{base_url}}/api/create_label"
+          }
+        },
+        {
+          "name": "Edit label",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label_id\": 1,\n  \"name\": \"Very Important\",\n  \"color\": \"#fbbc04\"\n}"
+            },
+            "url": "{{base_url}}/api/edit_label"
+          }
+        },
+        {
+          "name": "Delete label",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/api/delete_label/1"
+          }
+        },
+        {
+          "name": "Add label to task",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"label_id\": 1\n}"
+            },
+            "url": "{{base_url}}/api/add_label"
+          }
+        },
+        {
+          "name": "Remove label from task",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": 1,\n  \"label_id\": 1\n}"
+            },
+            "url": "{{base_url}}/api/remove_label"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Attachments",
+      "item": [
+        {
+          "name": "Upload file to task",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [] }
+              ]
+            },
+            "url": "{{base_url}}/upload/1"
+          }
+        },
+        {
+          "name": "Download attachment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/download/1"
+          }
+        },
+        {
+          "name": "Delete attachment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/api/delete_attachment/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pages",
+      "item": [
+        {
+          "name": "Home / Login page",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/" }
+        },
+        {
+          "name": "Boards page (HTML)",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/boards" }
+        },
+        {
+          "name": "Board view (HTML)",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/board/1" }
+        },
+        {
+          "name": "Login Activity (admin only)",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/login-log" }
+        }
+      ]
+    },
+    {
+      "name": "n8n Webhook (email test)",
+      "item": [
+        {
+          "name": "Test login alert webhook",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser\",\n  \"email\": \"testuser@gmail.com\",\n  \"ip\": \"1.2.3.4\",\n  \"time\": \"2026-08-11T18:00:00\"\n}"
+            },
+            "url": "http://localhost:5678/webhook/login-alert"
+          }
+        }
+      ]
+    }
+  ]
+}

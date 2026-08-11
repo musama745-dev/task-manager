@@ -1,5 +1,5 @@
 {
-  "name": "Login Alert -> Gmail",
+  "name": "Login Alert + Board Limit -> Gmail",
   "nodes": [
     {
       "parameters": {
@@ -18,6 +18,27 @@
     },
     {
       "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.type }}",
+        "rules": {
+          "values": [
+            {
+              "type": "string",
+              "value1": "board_limit"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-type-switch",
+      "name": "Type Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2.2,
+      "position": [480, 300],
+      "credentials": {}
+    },
+    {
+      "parameters": {
         "fromEmail": "YOUR_GMAIL@gmail.com",
         "toEmail": "YOUR_GMAIL@gmail.com",
         "subject": "=Login Alert: {{ $json.body.username }} logged in",
@@ -25,11 +46,32 @@
         "message": "=New login detected\n\nUsername: {{ $json.body.username }}\nEmail: {{ $json.body.email }}\nIP: {{ $json.body.ip }}\nTime: {{ $json.body.time }}\n\nTask Manager",
         "options": {}
       },
-      "id": "node-send-email",
-      "name": "Send Email",
+      "id": "node-send-login-email",
+      "name": "Send Login Email",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2,
-      "position": [480, 300],
+      "position": [760, 400],
+      "credentials": {
+        "smtp": {
+          "id": "cred-smtp-gmail",
+          "name": "Gmail SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "YOUR_GMAIL@gmail.com",
+        "toEmail": "YOUR_GMAIL@gmail.com",
+        "subject": "=Board Limit Reached: {{ $json.body.username }} has {{ $json.body.count }} boards",
+        "emailType": "text",
+        "message": "=Board limit alert\n\nUser: {{ $json.body.username }}\nEmail: {{ $json.body.email }}\nBoards: {{ $json.body.count }}\nLimit: {{ $json.body.limit }}\nTime: {{ $json.body.time }}\n\nTask Manager",
+        "options": {}
+      },
+      "id": "node-send-board-email",
+      "name": "Send Board Limit Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [760, 200],
       "credentials": {
         "smtp": {
           "id": "cred-smtp-gmail",
@@ -43,7 +85,25 @@
       "main": [
         [
           {
-            "node": "Send Email",
+            "node": "Type Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Type Switch": {
+      "main": [
+        [
+          {
+            "node": "Send Board Limit Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Login Email",
             "type": "main",
             "index": 0
           }

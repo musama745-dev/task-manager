@@ -13,26 +13,38 @@ app.secret_key = os.environ.get('SECRET_KEY', '') or 'task_manager_secret_key_12
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
-# n8n webhook URL for login email notifications (set in Vercel Dashboard)
+# n8n webhook URL for email notifications (login + board limit, set in Vercel Dashboard)
 N8N_LOGIN_WEBHOOK = os.environ.get('N8N_LOGIN_WEBHOOK', '')
 
-def notify_login(username, email, ip):
-    """Fire-and-forget webhook to n8n on login (background thread)."""
+def _notify_webhook(payload):
+    """Fire-and-forget webhook to n8n (background thread)."""
     if not N8N_LOGIN_WEBHOOK:
         return
     try:
-        requests.post(
-            N8N_LOGIN_WEBHOOK,
-            json={
-                'username': username,
-                'email': email or '',
-                'ip': ip or '',
-                'time': datetime.now().isoformat()
-            },
-            timeout=5
-        )
+        requests.post(N8N_LOGIN_WEBHOOK, json=payload, timeout=5)
     except Exception as e:
         print(f"n8n notify warning: {e}")
+
+def notify_login(username, email, ip):
+    """Email notification when a user logs in."""
+    _notify_webhook({
+        'type': 'login',
+        'username': username,
+        'email': email or '',
+        'ip': ip or '',
+        'time': datetime.now().isoformat()
+    })
+
+def notify_board_limit(username, email, count):
+    """Email notification when a user crosses the board limit."""
+    _notify_webhook({
+        'type': 'board_limit',
+        'username': username,
+        'email': email or '',
+        'count': count,
+        'limit': 50,
+        'time': datetime.now().isoformat()
+    })
 
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -226,6 +238,18 @@ def create_board():
         'description': data.get('description'),
         'owner_id': session['user_id']
     }).execute()
+
+    # Board limit alert: email when a user reaches 50 boards
+    try:
+        bcount = len(supabase.table('boards').select('id').eq('owner_id', session['user_id']).execute().data)
+        if bcount == 50:
+            uinfo = supabase.table('users').select('username', 'email').eq('id', session['user_id']).execute().data
+            uname = uinfo[0]['username'] if uinfo else session.get('username', 'user')
+            uemail = uinfo[0].get('email') if uinfo else ''
+            threading.Thread(target=notify_board_limit, args=(uname, uemail, bcount), daemon=True).start()
+    except Exception as e:
+        print(f"board limit check warning: {e}")
+
     return jsonify({'success': True})
 
 @app.route('/board/<int:board_id>')
