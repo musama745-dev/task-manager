@@ -1036,17 +1036,29 @@ def logout():
 def login_log():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    user_data = supabase.table('users').select('role').eq('id', session['user_id']).execute().data
+    try:
+        user_data = supabase.table('users').select('role').eq('id', session['user_id']).execute().data
+    except Exception as e:
+        print(f"login_log user query warning: {e}")
+        user_data = []
     if not user_data or user_data[0].get('role') != 'admin':
         return redirect(url_for('boards_page'))
-    logs = supabase.table('login_logs').select('*').order('login_time', desc=True).limit(500).execute().data
+    setup_needed = False
+    try:
+        logs = supabase.table('login_logs').select('*').order('login_time', desc=True).limit(500).execute().data
+    except Exception as e:
+        print(f"login_log query error: {e}")
+        logs = []
+        setup_needed = True
     counts = {}
     for log in logs:
         key = log['username']
-        counts.setdefault(key, {'username': key, 'email': log.get('email') or '', 'total': 0, 'last': log['login_time']})
+        last = log.get('login_time')
+        if key not in counts:
+            counts[key] = {'username': key, 'email': log.get('email') or '', 'total': 0, 'last': last or ''}
         counts[key]['total'] += 1
-        if log['login_time'] > counts[key]['last']:
-            counts[key]['last'] = log['login_time']
+        if last and (not counts[key]['last'] or last > counts[key]['last']):
+            counts[key]['last'] = last
     count_rows = sorted(counts.values(), key=lambda x: x['total'], reverse=True)
     return render_template_string('''
     <!DOCTYPE html>
@@ -1085,6 +1097,13 @@ def login_log():
                 <h1>📊 Login Activity</h1>
                 <a href="/boards" class="btn-back">← Back to Boards</a>
             </div>
+            {% if setup_needed %}
+            <div class="section" style="border: 2px solid #f59e0b; background: #fffbeb;">
+                <h2 style="color:#b45309;">⚠️ Database setup needed</h2>
+                <p style="font-size:13px; color:#92400e; line-height:1.7;">The <code style="background:#fef3c7; padding:2px 6px; border-radius:4px;">login_logs</code> table is missing or has no read access.
+                Open your <strong>Supabase Dashboard → SQL Editor</strong>, paste the full <code style="background:#fef3c7; padding:2px 6px; border-radius:4px;">init_supabase.sql</code> file, and run it. Then refresh this page.</p>
+            </div>
+            {% endif %}
             <div class="cards">
                 <div class="card"><div class="num">{{ logs|length }}</div><div class="lbl">Total Logins</div></div>
                 <div class="card"><div class="num">{{ count_rows|length }}</div><div class="lbl">Unique Users</div></div>
@@ -1115,7 +1134,7 @@ def login_log():
                     {% for log in logs %}
                     <tr>
                         <td>{{ loop.index }}</td>
-                        <td>{{ log['login_time'][:19].replace('T', ' ') }}</td>
+                        <td>{{ (log.get('login_time') or '')[:19].replace('T', ' ') or '—' }}</td>
                         <td>{{ log['username'] }}</td>
                         <td>{{ log.get('email') or '—' }}</td>
                         <td>{{ log.get('ip') or '—' }}</td>
@@ -1127,7 +1146,7 @@ def login_log():
         </div>
     </body>
     </html>
-    ''', logs=logs, count_rows=count_rows)
+    ''', logs=logs, count_rows=count_rows, setup_needed=setup_needed)
 
 LOGIN_PAGE = '''
 <!DOCTYPE html>
