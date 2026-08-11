@@ -2,6 +2,8 @@ from flask import Flask, render_template_string, request, redirect, url_for, fla
 from supabase import create_client, Client
 import hashlib
 import os
+import threading
+import requests
 from datetime import date, datetime
 
 app = Flask(__name__)
@@ -10,6 +12,27 @@ app.secret_key = os.environ.get('SECRET_KEY', '') or 'task_manager_secret_key_12
 # ============ SUPABASE SETUP ============
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
+
+# n8n webhook URL for login notifications (set in Vercel Dashboard)
+N8N_LOGIN_WEBHOOK = os.environ.get('N8N_LOGIN_WEBHOOK', '')
+
+def notify_login(username, email, ip):
+    """Fire-and-forget webhook to n8n on login (background thread)."""
+    if not N8N_LOGIN_WEBHOOK:
+        return
+    try:
+        requests.post(
+            N8N_LOGIN_WEBHOOK,
+            json={
+                'username': username,
+                'email': email or '',
+                'ip': ip or '',
+                'time': datetime.now().isoformat()
+            },
+            timeout=5
+        )
+    except Exception as e:
+        print(f"n8n notify warning: {e}")
 
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -985,6 +1008,11 @@ def login():
             user = user_data[0]
             session['user_id'] = user['id']
             session['username'] = user['username']
+            threading.Thread(
+                target=notify_login,
+                args=(user['username'], user.get('email') or '', request.remote_addr or ''),
+                daemon=True
+            ).start()
             flash(f'Welcome back, {user["username"]}!', 'success')
             return redirect(url_for('boards_page'))
         flash('Invalid username or password!', 'error')
@@ -997,6 +1025,7 @@ def register():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
         confirm = request.form.get('confirm_password', '').strip()
+        email = request.form.get('email', '').strip()
         if not username or not password: flash('Please fill all fields!', 'error')
         elif password != confirm: flash('Passwords do not match!', 'error')
         elif len(password) < 4: flash('Password must be at least 4 characters!', 'error')
@@ -1006,7 +1035,8 @@ def register():
             else:
                 supabase.table('users').insert({
                     'username': username,
-                    'password': hashlib.sha256(password.encode()).hexdigest()
+                    'password': hashlib.sha256(password.encode()).hexdigest(),
+                    'email': email or None
                 }).execute()
                 flash('Account created! Please login.', 'success')
             return redirect(url_for('login'))
@@ -1034,7 +1064,7 @@ REGISTER_PAGE = '''
 <style>body{font-family:'Poppins',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.register-box{background:white;padding:40px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,0.1);max-width:400px;width:90%}h1{color:#1a73e8;text-align:center}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:8px}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer}.links{text-align:center;margin-top:20px}.flash{padding:12px;border-radius:8px;margin-bottom:15px}.flash-success{background:#e6f4ea;color:#137333}.flash-error{background:#fce8e6;color:#c5221f}</style></head>
 <body><div class="register-box"><h1>📋 Task Manager</h1><p style="text-align:center;color:#5f6368;">Create a new account</p>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
-<form method="POST"><input type="text" name="username" placeholder="Choose a username" required><input type="password" name="password" placeholder="Password (min 4 chars)" required><input type="password" name="confirm_password" placeholder="Confirm password" required><button type="submit">✅ Register</button></form>
+<form method="POST"><input type="text" name="username" placeholder="Choose a username" required><input type="email" name="email" placeholder="Email (optional)"><input type="password" name="password" placeholder="Password (min 4 chars)" required><input type="password" name="confirm_password" placeholder="Confirm password" required><button type="submit">✅ Register</button></form>
 <div class="links">Already have an account? <a href="/login" style="color:#1a73e8;text-decoration:none;">Login here</a></div></div></body></html>
 '''
 

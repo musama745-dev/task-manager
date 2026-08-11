@@ -8,9 +8,13 @@ CREATE TABLE IF NOT EXISTS public.users (
     id SERIAL PRIMARY KEY,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
+    email TEXT,
     role TEXT DEFAULT 'user',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add email column to existing users table (for already-initialized databases)
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email TEXT;
 
 -- Boards
 CREATE TABLE IF NOT EXISTS public.boards (

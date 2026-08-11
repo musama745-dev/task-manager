@@ -1,0 +1,59 @@
+{
+  "name": "Login Alert -> Gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "login-alert",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-login-webhook",
+      "name": "Login Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "6f0a9d1e-c1b5-4e3f-8a77-9b2e6c1d4f01",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "fromEmail": "YOUR_GMAIL@gmail.com",
+        "toEmail": "YOUR_GMAIL@gmail.com",
+        "subject": "=Login Alert: {{ $json.body.username }} logged in",
+        "emailType": "text",
+        "message": "=New login detected\n\nUsername: {{ $json.body.username }}\nEmail: {{ $json.body.email }}\nIP: {{ $json.body.ip }}\nTime: {{ $json.body.time }}\n\nTask Manager",
+        "options": {}
+      },
+      "id": "node-send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "credentials": {
+        "smtp": {
+          "id": "cred-smtp-gmail",
+          "name": "Gmail SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Login Webhook": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {}
+}
