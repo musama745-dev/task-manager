@@ -2,7 +2,7 @@ from flask import Flask, render_template_string, request, redirect, url_for, fla
 from supabase import create_client, Client
 import hashlib
 import os
-from datetime import datetime
+from datetime import date, datetime
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', '') or 'task_manager_secret_key_12345'
@@ -93,6 +93,14 @@ def boards_page():
             .board-card:hover { transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.15); }
             .board-card h3 { margin: 0 0 10px 0; color: #333; font-size: 20px; font-weight: 600; }
             .board-card p { color: #666; font-size: 14px; }
+            .board-card .board-actions { display: flex; gap: 8px; margin-top: 14px; }
+            .card-btn { padding: 6px 14px; background: #f1f3f4; color: #333; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; transition: 0.2s; font-family: 'Poppins', sans-serif; }
+            .card-btn:hover { background: #e8eaed; }
+            .card-btn.del { background: #fee2e2; color: #991b2b; }
+            .card-btn.del:hover { background: #fecaca; }
+            .flash { padding: 12px 20px; border-radius: 10px; margin-bottom: 20px; font-weight: 500; }
+            .flash-success { background: #dcfce7; color: #166534; }
+            .flash-error { background: #fee2e2; color: #991b2b; }
             .add-board-btn { background: rgba(255,255,255,0.15); border: 2px dashed rgba(255,255,255,0.5); padding: 25px; border-radius: 16px; text-align: center; cursor: pointer; transition: 0.3s; color: white; backdrop-filter: blur(10px); }
             .add-board-btn:hover { background: rgba(255,255,255,0.25); border-color: white; transform: translateY(-5px); }
             .add-board-btn h3 { margin: 0; font-weight: 500; }
@@ -129,6 +137,10 @@ def boards_page():
                 <a href="/board/{{ board['id'] }}" class="board-card">
                     <h3>{{ board['name'] }}</h3>
                     <p>{{ board['description'] or 'No description' }}</p>
+                    <div class="board-actions">
+                        <button class="card-btn" onclick="event.preventDefault();event.stopPropagation();editBoard({{ board['id'] }}, '{{ board['name'] }}')">✏️ Edit</button>
+                        <button class="card-btn del" onclick="event.preventDefault();event.stopPropagation();deleteBoard({{ board['id'] }})">🗑️ Delete</button>
+                    </div>
                 </a>
                 {% endfor %}
                 <div class="add-board-btn" onclick="openAddBoardModal()">
@@ -156,6 +168,21 @@ def boards_page():
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name: name, description: document.getElementById('boardDesc').value.trim()})
             }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function editBoard(boardId, currentName) {
+            const name = prompt('Board name:', currentName);
+            if(!name || !name.trim()) return;
+            const desc = prompt('Description:', '');
+            fetch('/api/edit_board', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({board_id: boardId, name: name.trim(), description: desc})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteBoard(boardId) {
+            if(!confirm('Delete this board and all its lists/tasks?')) return;
+            fetch('/api/delete_board/' + boardId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
         }
         </script>
     </body>
@@ -237,6 +264,34 @@ def board_view(board_id):
             .add-list-btn { min-width: 300px; max-width: 300px; background: rgba(255,255,255,0.5); border: 2px dashed #a0aabf; border-radius: 16px; padding: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; }
             .add-list-btn:hover { background: rgba(255,255,255,0.8); border-color: #667eea; }
             .add-list-btn h3 { color: #5e6c84; margin: 0; font-weight: 500; }
+            .header-actions { display: flex; gap: 10px; align-items: center; }
+            .btn-sm { padding: 8px 16px; background: white; color: #333; border: none; border-radius: 12px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-family: 'Poppins', sans-serif; }
+            .btn-sm:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.1); transform: translateY(-2px); }
+            .btn-sm.btn-danger { background: #ea4335; color: white; }
+            .del-list { background: transparent; border: none; color: #5e6c84; font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: 0.2s; }
+            .del-list:hover { background: rgba(234,67,53,0.1); color: #ea4335; }
+            .task-header { display: flex; align-items: flex-start; gap: 8px; }
+            .completion-checkbox { width: 18px; height: 18px; accent-color: #34a853; cursor: pointer; margin-top: 2px; flex-shrink: 0; }
+            .task-card.completed { opacity: 0.6; }
+            .task-card.completed .card-title { text-decoration: line-through; color: #999; }
+            .task-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+            .priority-badge { display: inline-block; padding: 2px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; font-family: 'Poppins', sans-serif; }
+            .priority-badge.low { background: #dbeafe; color: #1e40af; }
+            .priority-badge.medium { background: #f3e5f5; color: #6b21a8; }
+            .priority-badge.high { background: #fee2e2; color: #991b2b; }
+            .due-date { display: inline-block; padding: 2px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; font-family: 'Poppins', sans-serif; }
+            .due-date.overdue { background: #fee2e2; color: #991b2b; }
+            .due-date.on-time { background: #dcfce7; color: #166534; }
+            .task-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+            .mini-btn { padding: 4px 10px; background: #f1f3f4; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: 0.2s; font-family: 'Poppins', sans-serif; }
+            .mini-btn:hover { background: #e8eaed; }
+            .mini-btn.del { background: #fee2e2; color: #991b2b; }
+            .mini-btn.del:hover { background: #fecaca; }
+            .label-manager-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+            .label-manager-row .label-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+            .flash { padding: 12px 20px; border-radius: 10px; margin-bottom: 20px; font-weight: 500; }
+            .flash-success { background: #dcfce7; color: #166534; }
+            .flash-error { background: #fee2e2; color: #991b2b; }
             .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); justify-content: center; align-items: center; z-index: 1000; }
             .modal-content { background: white; padding: 35px; border-radius: 20px; width: 500px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); position: relative; animation: slideUp 0.3s ease; }
             @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -254,21 +309,52 @@ def board_view(board_id):
         <div class="container">
             <div class="header">
                 <h1>📋 {{ board['name'] }}</h1>
-                <a href="/boards" class="btn-back">← Back to Boards</a>
+                <div class="header-actions">
+                    <button class="btn-sm" onclick="openLabelManager()">🏷️ Labels</button>
+                    <button class="btn-sm" onclick="editBoard()">✏️ Edit</button>
+                    <button class="btn-sm btn-danger" onclick="deleteBoard()">🗑️ Delete</button>
+                    <a href="/boards" class="btn-back">← Back to Boards</a>
+                </div>
             </div>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
             <div class="board">
                 {% for lst in lists %}
                 <div class="list-column" data-list-id="{{ lst['id'] }}">
                     <div class="list-header">
                         <h3>{{ lst['name'] }}</h3>
-                        <span class="task-count">{{ tasks|selectattr('list_id', 'equalto', lst['id'])|list|length }}</span>
+                        <span style="display:flex;align-items:center;gap:8px;">
+                            <span class="task-count">{{ tasks|selectattr('list_id', 'equalto', lst['id'])|list|length }}</span>
+                            <button class="del-list" onclick="deleteList({{ lst['id'] }})" title="Delete list">✕</button>
+                        </span>
                     </div>
                     <div>
                         {% for task in tasks if task['list_id'] == lst['id'] %}
-                        <div class="task-card" draggable="true" data-task-id="{{ task['id'] }}" data-list-id="{{ task['list_id'] }}">
-                            <div class="card-title">{{ task['title'] }}</div>
-                            {% if task['description'] %}<div class="card-desc">{{ task['description'][:60] }}{% if task['description']|length > 60 %}...{% endif %}</div>{% endif %}
-                            
+                        <div class="task-card{% if task['status'] == 'completed' %} completed{% endif %}" draggable="true" data-task-id="{{ task['id'] }}" data-list-id="{{ task['list_id'] }}">
+                            <div class="task-header">
+                                <input type="checkbox" class="completion-checkbox" {% if task['status'] == 'completed' %}checked{% endif %} onchange="toggleComplete({{ task['id'] }}, this.checked)" title="Mark complete">
+                                <div style="flex:1;">
+                                    <div class="card-title">{{ task['title'] }}</div>
+                                    {% if task['description'] %}<div class="card-desc">{{ task['description'][:60] }}{% if task['description']|length > 60 %}...{% endif %}</div>{% endif %}
+                                </div>
+                            </div>
+                            <div class="task-meta">
+                                {% set pri = task['priority'] or 'medium' %}
+                                <button class="priority-badge {{ pri }}" onclick="setPriority({{ task['id'] }}, '{{ pri }}')" title="Change priority">{{ pri|title }}</button>
+                                {% if task['due_date'] %}
+                                {% set due_date = task['due_date'] %}
+                                {% set due_date_obj = due_date.split('T')[0] if 'T' in due_date else due_date[:10] %}
+                                {% set cls = 'overdue' if due_date_obj < today else 'on-time' %}
+                                <button class="due-date {{ cls }}" onclick="setDueDate({{ task['id'] }}, '{{ task['due_date'] or '' }}')" title="Set due date">📅 {{ due_date_obj }}</button>
+                                {% else %}
+                                <button class="due-date on-time" onclick="setDueDate({{ task['id'] }}, '')" title="Set due date">📅 Set due date</button>
+                                {% endif %}
+                            </div>
                             <!-- Labels -->
                             <div class="labels-container" style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;">
                                 {% for label in labels_by_task[task['id']] %}
@@ -307,6 +393,11 @@ def board_view(board_id):
                                     </form>
                                 </div>
                             </div>
+                            <div class="task-actions">
+                                <button class="mini-btn" onclick="editTask({{ task['id'] }})">✏️ Edit</button>
+                                <button class="mini-btn" onclick="setDueDate({{ task['id'] }}, '{{ task['due_date'] or '' }}')">📅 Due</button>
+                                <button class="mini-btn del" onclick="deleteTask({{ task['id'] }})">🗑️ Delete</button>
+                            </div>
                         </div>
                         {% endfor %}
                     </div>
@@ -334,6 +425,30 @@ def board_view(board_id):
                 <textarea id="addCardDesc" placeholder="Description (optional)"></textarea>
                 <button onclick="submitAddCard()">Add</button>
                 <button onclick="closeModal('addCardModal')" style="background:#ea4335;">Cancel</button>
+            </div>
+        </div>
+        <div class="modal" id="labelManagerModal">
+            <div class="modal-content">
+                <h2>🏷️ Label Manager</h2>
+                <div style="margin-bottom:15px;">
+                    <div style="font-size:13px;font-weight:600;color:#5f6368;margin-bottom:6px;">New label:</div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input type="text" id="newLabelName" placeholder="Label name" style="flex:1;">
+                        <input type="color" id="newLabelColor" value="#1a73e8" style="width:50px;padding:2px;margin:0;">
+                        <button onclick="createLabel()" style="width:auto;padding:10px 16px;margin:0;">Create</button>
+                    </div>
+                </div>
+                <div style="max-height:300px;overflow-y:auto;">
+                    {% for label in all_labels %}
+                    <div class="label-manager-row">
+                        <span class="label-dot" style="background:{{ label['color'] }};"></span>
+                        <span style="flex:1;font-size:14px;">{{ label['name'] }}</span>
+                        <button class="mini-btn" onclick="editLabelPrompt({{ label['id'] }}, '{{ label['name'] }}', '{{ label['color'] }}')">Edit</button>
+                        <button class="mini-btn del" onclick="deleteLabel({{ label['id'] }})">Delete</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button onclick="closeModal('labelManagerModal')" style="background:#ea4335;">Close</button>
             </div>
         </div>
         <script>
@@ -446,10 +561,117 @@ def board_view(board_id):
             fetch('/api/delete_attachment/' + attId, { method: 'DELETE' })
             .then(res => res.json()).then(data => { if(data.success) location.reload(); });
         }
+
+        // Label Manager functions
+        function openLabelManager() {
+            document.getElementById('newLabelName').value = '';
+            document.getElementById('newLabelColor').value = '#1a73e8';
+            openModal('labelManagerModal');
+        }
+        function createLabel() {
+            const name = document.getElementById('newLabelName').value.trim();
+            const color = document.getElementById('newLabelColor').value;
+            if(!name) { alert('Please enter a label name!'); return; }
+            fetch('/api/create_label', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name, color: color})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function editLabelPrompt(labelId, currentName, currentColor) {
+            const name = prompt('Label name:', currentName);
+            if(!name || !name.trim()) return;
+            const color = prompt('Label color (e.g. #1a73e8):', currentColor);
+            fetch('/api/edit_label', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({label_id: labelId, name: name.trim(), color: color || currentColor})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteLabel(labelId) {
+            if(!confirm('Delete this label? It will be removed from all tasks.')) return;
+            fetch('/api/delete_label/' + labelId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+
+        // Board functions
+        function editBoard() {
+            const name = prompt('Board name:', document.querySelector('.header h1').textContent.replace('📋','').trim());
+            if(!name || !name.trim()) return;
+            const desc = prompt('Description:', '');
+            fetch('/api/edit_board', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({board_id: {{ board['id'] }}, name: name.trim(), description: desc})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteBoard() {
+            if(!confirm('Delete this board and all its lists/tasks?')) return;
+            fetch('/api/delete_board/{{ board['id'] }}', { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) window.location = '/boards'; else alert('Error: ' + data.error); });
+        }
+
+        // List functions
+        function deleteList(listId) {
+            if(!confirm('Delete this list and all its tasks?')) return;
+            fetch('/api/delete_list/' + listId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+
+        // Task functions
+        function editTask(taskId) {
+            const card = document.querySelector('.task-card[data-task-id="'+taskId+'"]');
+            const title = prompt('Task title:', card ? card.querySelector('.card-title').textContent.trim() : '');
+            if(!title || !title.trim()) return;
+            const desc = prompt('Description:');
+            fetch('/api/edit_task', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, title: title.trim(), description: desc})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function setDueDate(taskId, currentDue) {
+            const today = new Date().toISOString().split('T')[0];
+            const due = prompt('Enter due date (YYYY-MM-DD), or leave empty to clear:', currentDue || today);
+            if(due === null) return;
+            if(!due.trim()) {
+                fetch('/api/set_due_date', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({task_id: taskId, due_date: null})
+                }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+                return;
+            }
+            fetch('/api/set_due_date', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, due_date: due.trim()})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function deleteTask(taskId) {
+            if(!confirm('Delete this task?')) return;
+            fetch('/api/delete_task/' + taskId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function toggleComplete(taskId, completed) {
+            fetch('/api/toggle_complete/' + taskId, { method: 'POST' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function setPriority(taskId, currentPriority) {
+            const priorities = ['low', 'medium', 'high'];
+            const currentIndex = priorities.indexOf(currentPriority);
+            const nextIndex = (currentIndex + 1) % 3;
+            const nextPriority = priorities[nextIndex];
+            fetch('/api/set_priority', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, priority: nextPriority})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
         </script>
     </body>
     </html>
-    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task)
+    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, today=date.today().isoformat())
 
 # ============ API ROUTES ============
 
@@ -606,6 +828,148 @@ def delete_attachment(att_id):
     except:
         pass
     supabase.table('attachments').delete().eq('id', att_id).execute()
+    return jsonify({'success': True})
+
+# ============ BOARD / LIST / TASK MANAGEMENT API ============
+
+def is_owner_or_admin(board_id, user_id=None):
+    """Check if user owns the board or is admin."""
+    user_id = user_id or session['user_id']
+    board = supabase.table('boards').select('*').eq('id', board_id).execute().data
+    if not board:
+        return False
+    board = board[0]
+    if board.get('owner_id') == user_id:
+        return True
+    user = supabase.table('users').select('role').eq('id', user_id).execute().data
+    if user and user[0].get('role') == 'admin':
+        return True
+    return False
+
+def _task_owner_ok(task_id):
+    """Return True if current user owns the task's board (or is admin)."""
+    task = supabase.table('tasks').select('board_id').eq('id', task_id).execute().data
+    if not task:
+        return False
+    return is_owner_or_admin(task[0]['board_id'])
+
+@app.route('/api/boards', methods=['GET'])
+def api_boards():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    boards = supabase.table('boards').select('*').eq('owner_id', session['user_id']).order('created_at', desc=True).execute().data
+    return jsonify(boards)
+
+@app.route('/api/boards/<int:board_id>', methods=['GET'])
+def api_board_detail(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    board = supabase.table('boards').select('*').eq('id', board_id).eq('owner_id', session['user_id']).execute().data
+    if not board: return jsonify({'error': 'Board not found'}), 404
+    lists = supabase.table('board_lists').select('*').eq('board_id', board_id).order('position').execute().data
+    tasks = supabase.table('tasks').select('*').eq('board_id', board_id).order('position').execute().data
+    return jsonify({'board': board[0], 'lists': lists, 'tasks': tasks})
+
+@app.route('/api/edit_board', methods=['POST'])
+def edit_board():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    board_id = data.get('board_id')
+    name = (data.get('name') or '').strip()
+    if not board_id or not name: return jsonify({'error': 'Invalid data'}), 400
+    if not is_owner_or_admin(board_id): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('boards').update({'name': name, 'description': data.get('description')}).eq('id', board_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/delete_board/<int:board_id>', methods=['DELETE'])
+def delete_board(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    if not is_owner_or_admin(board_id): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('boards').delete().eq('id', board_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/delete_list/<int:list_id>', methods=['DELETE'])
+def delete_list(list_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    lst = supabase.table('board_lists').select('board_id').eq('id', list_id).execute().data
+    if not lst: return jsonify({'error': 'List not found'}), 404
+    if not is_owner_or_admin(lst[0]['board_id']): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('board_lists').delete().eq('id', list_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/edit_task', methods=['POST'])
+def edit_task():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    title = (data.get('title') or '').strip()
+    if not task_id or not title: return jsonify({'error': 'Invalid data'}), 400
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('tasks').update({'title': title, 'description': data.get('description')}).eq('id', task_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/delete_task/<int:task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('tasks').delete().eq('id', task_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/set_due_date', methods=['POST'])
+def set_due_date():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    if not task_id: return jsonify({'error': 'Invalid data'}), 400
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    due_date = data.get('due_date')
+    supabase.table('tasks').update({'due_date': due_date}).eq('id', task_id).execute()
+    return jsonify({'success': True, 'due_date': due_date})
+
+@app.route('/api/toggle_complete/<int:task_id>', methods=['POST'])
+def toggle_complete(task_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    task = supabase.table('tasks').select('status').eq('id', task_id).execute().data
+    if not task: return jsonify({'error': 'Task not found'}), 404
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    new_status = 'completed' if task[0].get('status') != 'completed' else 'pending'
+    supabase.table('tasks').update({'status': new_status}).eq('id', task_id).execute()
+    return jsonify({'success': True, 'status': new_status})
+
+@app.route('/api/set_priority', methods=['POST'])
+def set_priority():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    priority = data.get('priority')
+    if not task_id or priority not in ('low', 'medium', 'high'):
+        return jsonify({'error': 'Invalid data'}), 400
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('tasks').update({'priority': priority}).eq('id', task_id).execute()
+    return jsonify({'success': True, 'priority': priority})
+
+@app.route('/api/create_label', methods=['POST'])
+def create_label():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    color = (data.get('color') or '#1a73e8').strip()
+    if not name: return jsonify({'error': 'Label name required'}), 400
+    supabase.table('labels').insert({'name': name, 'color': color}).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/edit_label', methods=['POST'])
+def edit_label():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    label_id = data.get('label_id')
+    name = (data.get('name') or '').strip()
+    if not label_id or not name: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('labels').update({'name': name, 'color': (data.get('color') or '#1a73e8')}).eq('id', label_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/delete_label/<int:label_id>', methods=['DELETE'])
+def delete_label(label_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    supabase.table('labels').delete().eq('id', label_id).execute()
     return jsonify({'success': True})
 
 # ============ AUTH ROUTES ============

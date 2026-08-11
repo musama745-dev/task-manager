@@ -39,9 +39,15 @@ CREATE TABLE IF NOT EXISTS public.tasks (
     title TEXT NOT NULL,
     description TEXT,
     status TEXT DEFAULT 'pending',
+    due_date TEXT,
+    priority TEXT DEFAULT 'medium',
     position INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add new columns to existing tasks table (for already-initialized databases)
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS due_date TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium';
 
 -- Checklists (sub-tasks)
 CREATE TABLE IF NOT EXISTS public.checklists (
