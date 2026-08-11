@@ -2,6 +2,8 @@ from flask import Flask, render_template_string, request, redirect, url_for, fla
 from supabase import create_client, Client
 import hashlib
 import os
+import threading
+import requests
 from datetime import date, datetime
 
 app = Flask(__name__)
@@ -10,6 +12,27 @@ app.secret_key = os.environ.get('SECRET_KEY', '') or 'task_manager_secret_key_12
 # ============ SUPABASE SETUP ============
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
+
+# n8n webhook URL for login email notifications (set in Vercel Dashboard)
+N8N_LOGIN_WEBHOOK = os.environ.get('N8N_LOGIN_WEBHOOK', '')
+
+def notify_login(username, email, ip):
+    """Fire-and-forget webhook to n8n on login (background thread)."""
+    if not N8N_LOGIN_WEBHOOK:
+        return
+    try:
+        requests.post(
+            N8N_LOGIN_WEBHOOK,
+            json={
+                'username': username,
+                'email': email or '',
+                'ip': ip or '',
+                'time': datetime.now().isoformat()
+            },
+            timeout=5
+        )
+    except Exception as e:
+        print(f"n8n notify warning: {e}")
 
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -997,6 +1020,11 @@ def login():
                 }).execute()
             except Exception as e:
                 print(f"login log warning: {e}")
+            threading.Thread(
+                target=notify_login,
+                args=(user['username'], user.get('email') or '', request.remote_addr or ''),
+                daemon=True
+            ).start()
             flash(f'Welcome back, {user["username"]}!', 'success')
             return redirect(url_for('boards_page'))
         flash('Invalid username or password!', 'error')
