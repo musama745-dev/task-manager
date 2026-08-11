@@ -87,6 +87,16 @@ CREATE TABLE IF NOT EXISTS public.attachments (
     uploaded_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Login activity log
+CREATE TABLE IF NOT EXISTS public.login_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES public.users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    email TEXT,
+    ip TEXT,
+    login_time TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ==============================================
 -- ROW LEVEL SECURITY
 -- App khud auth karti hai (Flask + SHA256), isliye
@@ -100,12 +110,13 @@ ALTER TABLE public.checklists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.task_labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attachments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.login_logs ENABLE ROW LEVEL SECURITY;
 
 DO $$
 DECLARE
     t TEXT;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['users','boards','board_lists','tasks','checklists','labels','task_labels','attachments']
+    FOREACH t IN ARRAY ARRAY['users','boards','board_lists','tasks','checklists','labels','task_labels','attachments','login_logs']
     LOOP
         EXECUTE format('CREATE POLICY "anon_all_%s" ON public.%I FOR ALL TO anon USING (true) WITH CHECK (true)', t, t);
         EXECUTE format('CREATE POLICY "anon_select_%s" ON public.%I FOR SELECT TO anon USING (true)', t, t);

@@ -2,8 +2,6 @@ from flask import Flask, render_template_string, request, redirect, url_for, fla
 from supabase import create_client, Client
 import hashlib
 import os
-import threading
-import requests
 from datetime import date, datetime
 
 app = Flask(__name__)
@@ -12,27 +10,6 @@ app.secret_key = os.environ.get('SECRET_KEY', '') or 'task_manager_secret_key_12
 # ============ SUPABASE SETUP ============
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
-
-# n8n webhook URL for login notifications (set in Vercel Dashboard)
-N8N_LOGIN_WEBHOOK = os.environ.get('N8N_LOGIN_WEBHOOK', '')
-
-def notify_login(username, email, ip):
-    """Fire-and-forget webhook to n8n on login (background thread)."""
-    if not N8N_LOGIN_WEBHOOK:
-        return
-    try:
-        requests.post(
-            N8N_LOGIN_WEBHOOK,
-            json={
-                'username': username,
-                'email': email or '',
-                'ip': ip or '',
-                'time': datetime.now().isoformat()
-            },
-            timeout=5
-        )
-    except Exception as e:
-        print(f"n8n notify warning: {e}")
 
 supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
@@ -145,6 +122,9 @@ def boards_page():
                 <h1>📋 My Boards</h1>
                 <div>
                     <span class="user-info">👤 {{ user['username'] }}</span>
+                    {% if user['role'] == 'admin' %}
+                    <a href="/login-log" class="btn-logout">📊 Login Activity</a>
+                    {% endif %}
                     <a href="/logout" class="btn-logout">Logout</a>
                 </div>
             </div>
@@ -1008,11 +988,15 @@ def login():
             user = user_data[0]
             session['user_id'] = user['id']
             session['username'] = user['username']
-            threading.Thread(
-                target=notify_login,
-                args=(user['username'], user.get('email') or '', request.remote_addr or ''),
-                daemon=True
-            ).start()
+            try:
+                supabase.table('login_logs').insert({
+                    'user_id': user['id'],
+                    'username': user['username'],
+                    'email': user.get('email') or '',
+                    'ip': request.remote_addr or ''
+                }).execute()
+            except Exception as e:
+                print(f"login log warning: {e}")
             flash(f'Welcome back, {user["username"]}!', 'success')
             return redirect(url_for('boards_page'))
         flash('Invalid username or password!', 'error')
@@ -1047,6 +1031,103 @@ def logout():
     session.clear()
     flash('Logged out successfully!', 'success')
     return redirect(url_for('login'))
+
+@app.route('/login-log')
+def login_log():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    user_data = supabase.table('users').select('role').eq('id', session['user_id']).execute().data
+    if not user_data or user_data[0].get('role') != 'admin':
+        return redirect(url_for('boards_page'))
+    logs = supabase.table('login_logs').select('*').order('login_time', desc=True).limit(500).execute().data
+    counts = {}
+    for log in logs:
+        key = log['username']
+        counts.setdefault(key, {'username': key, 'email': log.get('email') or '', 'total': 0, 'last': log['login_time']})
+        counts[key]['total'] += 1
+        if log['login_time'] > counts[key]['last']:
+            counts[key]['last'] = log['login_time']
+    count_rows = sorted(counts.values(), key=lambda x: x['total'], reverse=True)
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Login Activity</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Poppins', sans-serif; background: #f0f2f5; min-height: 100vh; padding: 30px 20px; }
+            .container { max-width: 1000px; margin: auto; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 10px; }
+            .header h1 { font-size: 26px; font-weight: 700; color: #333; }
+            .btn-back { padding: 10px 20px; background: white; color: #333; text-decoration: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-weight: 500; }
+            .btn-back:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.1); transform: translateY(-2px); }
+            .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px; }
+            .card { background: white; padding: 20px; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+            .card .num { font-size: 30px; font-weight: 700; color: #667eea; }
+            .card .lbl { font-size: 13px; color: #5e6c84; margin-top: 4px; }
+            .section { background: white; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 25px; }
+            .section h2 { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 15px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #eee; }
+            th { color: #5e6c84; font-weight: 600; background: #f8f9fa; }
+            td { color: #333; }
+            .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #e8eaed; color: #333; }
+            .badge.top { background: #fee2e2; color: #991b2b; }
+            .table-scroll { overflow-x: auto; }
+            @media (max-width: 600px) { th, td { font-size: 12px; padding: 8px; } }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📊 Login Activity</h1>
+                <a href="/boards" class="btn-back">← Back to Boards</a>
+            </div>
+            <div class="cards">
+                <div class="card"><div class="num">{{ logs|length }}</div><div class="lbl">Total Logins</div></div>
+                <div class="card"><div class="num">{{ count_rows|length }}</div><div class="lbl">Unique Users</div></div>
+                <div class="card"><div class="num">{{ count_rows|selectattr('total', 'gt', 1)|list|length }}</div><div class="lbl">Repeat Logins</div></div>
+            </div>
+            <div class="section">
+                <h2>👤 Login Count per User</h2>
+                <div class="table-scroll">
+                <table>
+                    <tr><th>#</th><th>Username</th><th>Email</th><th>Total Logins</th><th>Last Login</th></tr>
+                    {% for row in count_rows %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td><span class="badge{% if row['total'] > 1 %} top{% endif %}">{{ row['username'] }}</span></td>
+                        <td>{{ row['email'] or '—' }}</td>
+                        <td>{{ row['total'] }}</td>
+                        <td>{{ row['last'][:19].replace('T', ' ') if row['last'] else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                </div>
+            </div>
+            <div class="section">
+                <h2>📝 Recent Login History</h2>
+                <div class="table-scroll">
+                <table>
+                    <tr><th>#</th><th>Time</th><th>Username</th><th>Email</th><th>IP Address</th></tr>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ log['login_time'][:19].replace('T', ' ') }}</td>
+                        <td>{{ log['username'] }}</td>
+                        <td>{{ log.get('email') or '—' }}</td>
+                        <td>{{ log.get('ip') or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    ''', logs=logs, count_rows=count_rows)
 
 LOGIN_PAGE = '''
 <!DOCTYPE html>
