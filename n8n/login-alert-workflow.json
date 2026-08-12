@@ -33,7 +33,7 @@
       "id": "node-type-switch",
       "name": "Type Switch",
       "type": "n8n-nodes-base.switch",
-      "typeVersion": 2.2,
+      "typeVersion": 2,
       "position": [480, 300],
       "credentials": {}
     },
