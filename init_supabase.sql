@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS public.tasks (
 -- Add new columns to existing tasks table (for already-initialized databases)
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS due_date TEXT;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium';
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS assignee_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL;
+
+-- Comments on tasks
+CREATE TABLE IF NOT EXISTS public.comments (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES public.tasks(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES public.users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- Checklists (sub-tasks)
 CREATE TABLE IF NOT EXISTS public.checklists (
@@ -111,12 +121,38 @@ ALTER TABLE public.labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.task_labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.login_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activity_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.board_shares ENABLE ROW LEVEL SECURITY;
+
+-- Activity log for boards
+CREATE TABLE IF NOT EXISTS public.activity_log (
+    id SERIAL PRIMARY KEY,
+    board_id INTEGER REFERENCES public.boards(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Board sharing
+CREATE TABLE IF NOT EXISTS public.board_shares (
+    id SERIAL PRIMARY KEY,
+    board_id INTEGER REFERENCES public.boards(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES public.users(id) ON DELETE CASCADE,
+    shared_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(board_id, user_id)
+);
+
+-- Recurring tasks support
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS recurring TEXT;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS next_run TIMESTAMPTZ;
 
 DO $$
 DECLARE
     t TEXT;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['users','boards','board_lists','tasks','checklists','labels','task_labels','attachments','login_logs']
+    FOREACH t IN ARRAY ARRAY['users','boards','board_lists','tasks','checklists','labels','task_labels','attachments','login_logs','comments','activity_log','board_shares']
     LOOP
         IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = t AND policyname = format('anon_all_%s', t)) THEN
             EXECUTE format('CREATE POLICY "anon_all_%s" ON public.%I FOR ALL TO anon USING (true) WITH CHECK (true)', t, t);

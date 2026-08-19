@@ -16,6 +16,39 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 # n8n webhook URL for email notifications (login + board limit, set in Vercel Dashboard)
 N8N_LOGIN_WEBHOOK = os.environ.get('N8N_LOGIN_WEBHOOK', '')
 
+# ============ GOOGLE SETUP ============
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+
+# ============ POSTHOG SETUP ============
+POSTHOG_API_KEY = os.environ.get('POSTHOG_API_KEY', '01a00fa2-edf3-0000-8c6f-c5854ca38dcb')
+POSTHOG_HOST = os.environ.get('POSTHOG_HOST', 'https://us.posthog.com')
+
+try:
+    from posthog import Posthog
+    posthog_client = Posthog(project_api_key=POSTHOG_API_KEY, host=POSTHOG_HOST)
+    _posthog_available = True
+except Exception as e:
+    print(f"posthog init warning: {e}")
+    posthog_client = None
+    _posthog_available = False
+
+def track_event(distinct_id, event, properties=None):
+    """Safely track a PostHog event (non-blocking)."""
+    if not _posthog_available:
+        return
+    try:
+        props = dict(properties or {})
+        props.setdefault('$ip', request.remote_addr or '')
+        threading.Thread(
+            target=posthog_client.capture,
+            args=(str(distinct_id), event),
+            kwargs={'properties': props},
+            daemon=True
+        ).start()
+    except Exception as e:
+        print(f"posthog track warning: {e}")
+
 def _notify_webhook(payload):
     """Fire-and-forget webhook to n8n (background thread)."""
     if not N8N_LOGIN_WEBHOOK:
@@ -27,13 +60,8 @@ def _notify_webhook(payload):
 
 def notify_login(username, email, ip):
     """Email notification when a user logs in."""
-    _notify_webhook({
-        'type': 'login',
-        'username': username,
-        'email': email or '',
-        'ip': ip or '',
-        'time': datetime.now().isoformat()
-    })
+    pass  # Webhook removed for logins
+
 
 def notify_board_limit(username, email, count):
     """Email notification when a user crosses the board limit."""
@@ -114,8 +142,10 @@ def boards_page():
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
+            :root { --bg-grad-start: #667eea; --bg-grad-end: #764ba2; --card-bg: white; --text: #333; --text-secondary: #666; --border: #eee; }
+            [data-theme="dark"] { --bg-grad-start: #1a1a2e; --bg-grad-end: #16213e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+            body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, var(--bg-grad-start) 0%, var(--bg-grad-end) 100%); min-height: 100vh; padding: 20px; }
             .container { max-width: 1200px; margin: auto; }
             .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; color: white; }
             .header h1 { font-size: 32px; font-weight: 700; }
@@ -123,11 +153,11 @@ def boards_page():
             .btn-logout { background: rgba(255,255,255,0.2); color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none; margin-left: 15px; transition: 0.3s; }
             .btn-logout:hover { background: rgba(255,255,255,0.4); }
             .boards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 25px; }
-            .board-card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); transition: all 0.3s ease; text-decoration: none; color: #333; display: block; position: relative; overflow: hidden; }
+            .board-card { background: var(--card-bg); padding: 25px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); transition: all 0.3s ease; text-decoration: none; color: var(--text); display: block; position: relative; overflow: hidden; }
             .board-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: linear-gradient(90deg, #667eea, #764ba2); }
             .board-card:hover { transform: translateY(-8px); box-shadow: 0 20px 40px rgba(0,0,0,0.15); }
-            .board-card h3 { margin: 0 0 10px 0; color: #333; font-size: 20px; font-weight: 600; }
-            .board-card p { color: #666; font-size: 14px; }
+            .board-card h3 { margin: 0 0 10px 0; color: var(--text); font-size: 20px; font-weight: 600; }
+            .board-card p { color: var(--text-secondary); font-size: 14px; }
             .board-card .board-actions { display: flex; gap: 8px; margin-top: 14px; }
             .card-btn { padding: 6px 14px; background: #f1f3f4; color: #333; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; transition: 0.2s; font-family: 'Poppins', sans-serif; }
             .card-btn:hover { background: #e8eaed; }
@@ -140,10 +170,10 @@ def boards_page():
             .add-board-btn:hover { background: rgba(255,255,255,0.25); border-color: white; transform: translateY(-5px); }
             .add-board-btn h3 { margin: 0; font-weight: 500; }
             .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); justify-content: center; align-items: center; z-index: 1000; }
-            .modal-content { background: white; padding: 40px; border-radius: 20px; width: 450px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: slideUp 0.3s ease; }
+            .modal-content { background: var(--card-bg); padding: 40px; border-radius: 20px; width: 450px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: slideUp 0.3s ease; }
             @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
             .modal-content h2 { color: #333; margin-bottom: 20px; font-weight: 600; }
-            .modal-content input { width: 100%; padding: 14px; margin: 12px 0; border: 2px solid #eee; border-radius: 12px; font-size: 15px; transition: 0.3s; }
+            .modal-content input { width: 100%; padding: 14px; margin: 12px 0; border: 2px solid var(--border); border-radius: 12px; font-size: 15px; transition: 0.3s; background: var(--bg); color: var(--text); }
             .modal-content input:focus { border-color: #667eea; outline: none; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
             .modal-content button { padding: 14px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 16px; font-weight: 600; transition: 0.3s; width: 100%; margin-top: 10px; }
             .modal-content button:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }
@@ -156,6 +186,7 @@ def boards_page():
             <div class="header">
                 <h1>📋 My Boards</h1>
                 <div>
+                    <button class="btn-logout" onclick="toggleDark()" id="darkBtn" style="border-radius:30px;border:none;cursor:pointer;font-size:16px;">🌙</button>
                     <span class="user-info">👤 {{ user['username'] }}</span>
                     {% if user['role'] == 'admin' %}
                     <a href="/login-log" class="btn-logout">📊 Login Activity</a>
@@ -238,6 +269,10 @@ def create_board():
         'description': data.get('description'),
         'owner_id': session['user_id']
     }).execute()
+    track_event(session['user_id'], 'board_created', {
+        'board_name': name,
+        'board_id': session['user_id']
+    })
 
     # Board limit alert: email when a user reaches 50 boards
     try:
@@ -283,7 +318,34 @@ def board_view(board_id):
         all_att = supabase.table('attachments').select('*').in_('task_id', task_ids).order('uploaded_at', desc=True).execute().data
         for att in all_att:
             attachments_by_task[att['task_id']].append(att)
+    # Fetch comments for all tasks
+    comments_by_task = {tid: [] for tid in task_ids}
+    if task_ids:
+        all_cm = supabase.table('comments').select('*, users(username)').in_('task_id', task_ids).order('created_at').execute().data
+        for cm in all_cm:
+            u = cm.pop('users', None)
+            cm['username'] = u['username'] if u else ''
+            comments_by_task[cm['task_id']].append(cm)
     all_labels = supabase.table('labels').select('*').execute().data
+    all_users = supabase.table('users').select('id, username').execute().data
+    # Activity log
+    activity_logs = []
+    try:
+        activity_logs = supabase.table('activity_log').select('*, users(username)').eq('board_id', board_id).order('created_at', desc=True).limit(30).execute().data
+        for al in activity_logs:
+            u = al.pop('users', None)
+            al['username'] = u['username'] if u else 'system'
+    except:
+        pass
+    # Board shares
+    board_shares = []
+    try:
+        board_shares = supabase.table('board_shares').select('*, users(username)').eq('board_id', board_id).execute().data
+        for bs in board_shares:
+            u = bs.pop('users', None)
+            bs['username'] = u['username'] if u else ''
+    except:
+        pass
     return render_template_string('''
     <!DOCTYPE html>
     <html>
@@ -292,33 +354,41 @@ def board_view(board_id):
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
+            :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --list-bg: #ebecf0; --border: #eee; --modal-bg: white; }
+            [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --list-bg: #0f3460; --border: #333; --modal-bg: #16213e; }
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Poppins', sans-serif; background: #f0f2f5; min-height: 100vh; padding: 20px; }
+            body { font-family: 'Poppins', sans-serif; background: var(--bg); min-height: 100vh; padding: 20px; color: var(--text); }
             .container { max-width: 100%; margin: auto; }
-            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding: 0 10px; }
-            .header h1 { font-size: 28px; font-weight: 700; color: #333; display: flex; align-items: center; gap: 10px; }
-            .btn-back { padding: 10px 20px; background: white; color: #333; text-decoration: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-weight: 500; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 0 10px; flex-wrap: wrap; gap: 10px; }
+            .header h1 { font-size: 28px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+            .btn-back { padding: 10px 20px; background: var(--card-bg); color: var(--text); text-decoration: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-weight: 500; }
             .btn-back:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.1); transform: translateY(-2px); }
+            .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; padding: 12px 16px; background: var(--card-bg); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); flex-wrap: wrap; align-items: center; }
+            .filter-bar input, .filter-bar select { padding: 8px 12px; border: 2px solid var(--border); border-radius: 8px; font-size: 13px; font-family: 'Poppins', sans-serif; background: var(--bg); color: var(--text); }
+            .filter-bar input { flex: 1; min-width: 180px; }
+            .filter-bar select { min-width: 130px; }
+            .filter-bar .filter-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+            .filter-clear { padding: 6px 14px; background: #ea4335; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; font-family: 'Poppins', sans-serif; }
             .board { display: flex; gap: 20px; overflow-x: auto; padding: 10px 0 30px 0; min-height: 400px; }
-            .list-column { background: #ebecf0; border-radius: 16px; padding: 15px; min-width: 300px; max-width: 300px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+            .list-column { background: var(--list-bg); border-radius: 16px; padding: 15px; min-width: 300px; max-width: 300px; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
             .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 5px; }
-            .list-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #172b4d; }
-            .list-header .task-count { background: rgba(9,30,66,0.08); padding: 2px 12px; border-radius: 20px; font-size: 12px; color: #5e6c84; }
-            .task-card { background: white; padding: 14px 16px; border-radius: 12px; box-shadow: 0 1px 3px rgba(9,30,66,0.15); margin-bottom: 10px; cursor: grab; transition: all 0.2s ease; border: 1px solid transparent; }
+            .list-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+            .list-header .task-count { background: rgba(9,30,66,0.08); padding: 2px 12px; border-radius: 20px; font-size: 12px; color: var(--text-secondary); }
+            .task-card { background: var(--card-bg); padding: 14px 16px; border-radius: 12px; box-shadow: 0 1px 3px rgba(9,30,66,0.15); margin-bottom: 10px; cursor: grab; transition: all 0.2s ease; border: 1px solid transparent; }
             .task-card:hover { box-shadow: 0 4px 12px rgba(9,30,66,0.2); transform: translateY(-2px); border-color: #667eea; }
-            .task-card .card-title { font-weight: 600; font-size: 15px; color: #172b4d; margin-bottom: 4px; }
-            .task-card .card-desc { font-size: 13px; color: #5e6c84; margin-bottom: 6px; }
+            .task-card .card-title { font-weight: 600; font-size: 15px; color: var(--text); margin-bottom: 4px; }
+            .task-card .card-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
             .task-card.dragging { opacity: 0.5; transform: scale(0.95); }
-            .add-card-btn { width: 100%; padding: 10px; background: transparent; border: none; border-radius: 8px; margin-top: 8px; cursor: pointer; color: #5e6c84; font-size: 14px; transition: 0.2s; font-weight: 500; }
-            .add-card-btn:hover { background: rgba(9,30,66,0.08); color: #172b4d; }
+            .add-card-btn { width: 100%; padding: 10px; background: transparent; border: none; border-radius: 8px; margin-top: 8px; cursor: pointer; color: var(--text-secondary); font-size: 14px; transition: 0.2s; font-weight: 500; }
+            .add-card-btn:hover { background: rgba(9,30,66,0.08); color: var(--text); }
             .add-list-btn { min-width: 300px; max-width: 300px; background: rgba(255,255,255,0.5); border: 2px dashed #a0aabf; border-radius: 16px; padding: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.3s; }
             .add-list-btn:hover { background: rgba(255,255,255,0.8); border-color: #667eea; }
-            .add-list-btn h3 { color: #5e6c84; margin: 0; font-weight: 500; }
+            .add-list-btn h3 { color: var(--text-secondary); margin: 0; font-weight: 500; }
             .header-actions { display: flex; gap: 10px; align-items: center; }
-            .btn-sm { padding: 8px 16px; background: white; color: #333; border: none; border-radius: 12px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-family: 'Poppins', sans-serif; }
+            .btn-sm { padding: 8px 16px; background: var(--card-bg); color: var(--text); border: none; border-radius: 12px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.05); transition: 0.3s; font-family: 'Poppins', sans-serif; }
             .btn-sm:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.1); transform: translateY(-2px); }
             .btn-sm.btn-danger { background: #ea4335; color: white; }
-            .del-list { background: transparent; border: none; color: #5e6c84; font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: 0.2s; }
+            .del-list { background: transparent; border: none; color: var(--text-secondary); font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: 0.2s; }
             .del-list:hover { background: rgba(234,67,53,0.1); color: #ea4335; }
             .task-header { display: flex; align-items: flex-start; gap: 8px; }
             .completion-checkbox { width: 18px; height: 18px; accent-color: #34a853; cursor: pointer; margin-top: 2px; flex-shrink: 0; }
@@ -333,26 +403,39 @@ def board_view(board_id):
             .due-date.overdue { background: #fee2e2; color: #991b2b; }
             .due-date.on-time { background: #dcfce7; color: #166534; }
             .task-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-            .mini-btn { padding: 4px 10px; background: #f1f3f4; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: 0.2s; font-family: 'Poppins', sans-serif; }
+            .mini-btn { padding: 4px 10px; background: var(--border); color: var(--text); border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; transition: 0.2s; font-family: 'Poppins', sans-serif; }
             .mini-btn:hover { background: #e8eaed; }
             .mini-btn.del { background: #fee2e2; color: #991b2b; }
             .mini-btn.del:hover { background: #fecaca; }
+            .assignee-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: #e8eaf6; color: #283593; cursor: pointer; border: none; font-family: 'Poppins', sans-serif; }
+            .comments-section { margin: 8px 0; padding: 8px; background: var(--bg); border-radius: 8px; }
+            .comment-item { display: flex; justify-content: space-between; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+            .comment-item:last-child { border-bottom: none; }
+            .comment-user { font-weight: 600; color: #667eea; margin-right: 6px; }
+            .comment-body { color: var(--text); flex: 1; }
+            .comment-time { font-size: 11px; color: var(--text-secondary); margin-left: 8px; white-space: nowrap; }
+            .comment-del { color: #ea4335; cursor: pointer; font-size: 11px; margin-left: 4px; }
+            .comment-input-row { display: flex; gap: 6px; margin-top: 6px; }
+            .comment-input-row input { flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: var(--card-bg); color: var(--text); }
+            .comment-input-row button { padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
             .label-manager-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
             .label-manager-row .label-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
             .flash { padding: 12px 20px; border-radius: 10px; margin-bottom: 20px; font-weight: 500; }
             .flash-success { background: #dcfce7; color: #166534; }
             .flash-error { background: #fee2e2; color: #991b2b; }
             .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); justify-content: center; align-items: center; z-index: 1000; }
-            .modal-content { background: white; padding: 35px; border-radius: 20px; width: 500px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); position: relative; animation: slideUp 0.3s ease; }
+            .modal-content { background: var(--modal-bg); padding: 35px; border-radius: 20px; width: 500px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); position: relative; animation: slideUp 0.3s ease; }
             @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-            .modal-content h2 { font-size: 24px; font-weight: 600; color: #333; margin-bottom: 20px; }
-            .modal-content input, .modal-content textarea, .modal-content select { width: 100%; padding: 12px 16px; margin: 8px 0; border: 2px solid #eee; border-radius: 12px; font-size: 15px; transition: 0.3s; font-family: 'Poppins', sans-serif; }
+            .modal-content h2 { font-size: 24px; font-weight: 600; color: var(--text); margin-bottom: 20px; }
+            .modal-content input, .modal-content textarea, .modal-content select { width: 100%; padding: 12px 16px; margin: 8px 0; border: 2px solid var(--border); border-radius: 12px; font-size: 15px; transition: 0.3s; font-family: 'Poppins', sans-serif; background: var(--bg); color: var(--text); }
             .modal-content input:focus, .modal-content textarea:focus { border-color: #667eea; outline: none; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
             .modal-content textarea { resize: vertical; min-height: 80px; }
             .modal-content button { padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 16px; font-weight: 600; transition: 0.3s; width: 100%; margin-top: 10px; }
             .modal-content button:hover { transform: scale(1.02); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3); }
             .modal-close { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: #999; transition: 0.3s; }
-            .modal-close:hover { color: #333; transform: rotate(90deg); }
+            .modal-close:hover { color: var(--text); transform: rotate(90deg); }
+            .dark-toggle { background: var(--card-bg); border: 2px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 12px; cursor: pointer; font-size: 18px; transition: 0.3s; }
+            .dark-toggle:hover { transform: scale(1.1); }
         </style>
     </head>
     <body>
@@ -360,11 +443,38 @@ def board_view(board_id):
             <div class="header">
                 <h1>📋 {{ board['name'] }}</h1>
                 <div class="header-actions">
+                    <button class="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" id="darkBtn">🌙</button>
+                    <button class="btn-sm" onclick="openActivityLog()">📜 Activity</button>
+                    <button class="btn-sm" onclick="openShareBoard()">👥 Share</button>
+                    <button class="btn-sm" onclick="window.location='/api/export_board/{{ board['id'] }}'">📥 Export CSV</button>
                     <button class="btn-sm" onclick="openLabelManager()">🏷️ Labels</button>
                     <button class="btn-sm" onclick="editBoard()">✏️ Edit</button>
                     <button class="btn-sm btn-danger" onclick="deleteBoard()">🗑️ Delete</button>
-                    <a href="/boards" class="btn-back">← Back to Boards</a>
+                    <a href="/boards" class="btn-back">← Back</a>
                 </div>
+            </div>
+            <div class="filter-bar">
+                <span class="filter-label">🔍 Filter:</span>
+                <input type="text" id="searchInput" placeholder="Search tasks..." oninput="filterTasks()">
+                <select id="filterPriority" onchange="filterTasks()">
+                    <option value="">All Priorities</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                </select>
+                <select id="filterLabel" onchange="filterTasks()">
+                    <option value="">All Labels</option>
+                    {% for label in all_labels %}
+                    <option value="{{ label['name'] }}">{{ label['name'] }}</option>
+                    {% endfor %}
+                </select>
+                <select id="filterAssignee" onchange="filterTasks()">
+                    <option value="">All Assignees</option>
+                    {% for u in all_users %}
+                    <option value="{{ u['id'] }}">{{ u['username'] }}</option>
+                    {% endfor %}
+                </select>
+                <button class="filter-clear" onclick="clearFilters()">Clear</button>
             </div>
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
@@ -385,7 +495,7 @@ def board_view(board_id):
                     </div>
                     <div>
                         {% for task in tasks if task['list_id'] == lst['id'] %}
-                        <div class="task-card{% if task['status'] == 'completed' %} completed{% endif %}" draggable="true" data-task-id="{{ task['id'] }}" data-list-id="{{ task['list_id'] }}">
+                        <div class="task-card{% if task['status'] == 'completed' %} completed{% endif %}" draggable="true" data-task-id="{{ task['id'] }}" data-list-id="{{ task['list_id'] }}" data-title="{{ task['title']|lower }}" data-priority="{{ task['priority'] or 'medium' }}" data-labels="{{ labels_by_task[task['id']]|map(attribute='name')|join(',')|lower }}" data-assignee="{{ task.get('assignee_id') or '' }}">
                             <div class="task-header">
                                 <input type="checkbox" class="completion-checkbox" {% if task['status'] == 'completed' %}checked{% endif %} onchange="toggleComplete({{ task['id'] }}, this.checked)" title="Mark complete">
                                 <div style="flex:1;">
@@ -410,6 +520,16 @@ def board_view(board_id):
                                 {% for label in labels_by_task[task['id']] %}
                                 <span style="background:{{ label['color'] }};padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:white;">{{ label['name'] }}</span>
                                 {% endfor %}
+                            </div>
+
+                            <!-- Assignee -->
+                            <div style="margin:6px 0;">
+                                <select class="assignee-badge" onchange="assignTask({{ task['id'] }}, this.value)" title="Assign to">
+                                    <option value=""{% if not task.get('assignee_id') %} selected{% endif %}>👤 Unassigned</option>
+                                    {% for u in all_users %}
+                                    <option value="{{ u['id'] }}"{% if task.get('assignee_id') == u['id'] %} selected{% endif %}>👤 {{ u['username'] }}</option>
+                                    {% endfor %}
+                                </select>
                             </div>
 
                             <!-- Checklists -->
@@ -440,13 +560,30 @@ def board_view(board_id):
                                     <form action="/upload/{{ task['id'] }}" method="POST" enctype="multipart/form-data" style="display:flex;gap:6px;flex:1;flex-wrap:wrap;">
                                         <input type="file" name="file" style="flex:1;padding:4px;font-size:13px;border:1px solid #ddd;border-radius:6px;">
                                         <button type="submit" style="padding:4px 12px;background:#1a73e8;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Upload</button>
-                                    </form>
+                                    </form><a href="/google/login" style="display:block;width:100%;padding:12px;background:#fff;color:#333;border:1px solid #ddd;border-radius:8px;text-align:center;text-decoration:none;margin-top:10px;box-sizing:border-box;">?? Continue with Google</a>
                                 </div>
                             </div>
                             <div class="task-actions">
                                 <button class="mini-btn" onclick="editTask({{ task['id'] }})">✏️ Edit</button>
                                 <button class="mini-btn" onclick="setDueDate({{ task['id'] }}, '{{ task['due_date'] or '' }}')">📅 Due</button>
                                 <button class="mini-btn del" onclick="deleteTask({{ task['id'] }})">🗑️ Delete</button>
+                            </div>
+
+                            <!-- Comments -->
+                            <div class="comments-section">
+                                <div style="font-size:13px;font-weight:600;color:#5f6368;margin-bottom:4px;">💬 Comments ({{ comments_by_task[task['id']]|length }}):</div>
+                                {% for cm in comments_by_task[task['id']] %}
+                                <div class="comment-item">
+                                    <span class="comment-user">{{ cm['username'] }}</span>
+                                    <span class="comment-body">{{ cm['body'] }}</span>
+                                    <span class="comment-time">{{ cm['created_at'][:16].replace('T',' ') if cm['created_at'] else '' }}</span>
+                                    <span class="comment-del" onclick="deleteComment({{ cm['id'] }})">✕</span>
+                                </div>
+                                {% endfor %}
+                                <div class="comment-input-row">
+                                    <input type="text" id="newComment_{{ task['id'] }}" placeholder="Write a comment..." onkeypress="if(event.key==='Enter')addComment({{ task['id'] }})">
+                                    <button onclick="addComment({{ task['id'] }})">Send</button>
+                                </div>
                             </div>
                         </div>
                         {% endfor %}
@@ -499,6 +636,78 @@ def board_view(board_id):
                     {% endfor %}
                 </div>
                 <button onclick="closeModal('labelManagerModal')" style="background:#ea4335;">Close</button>
+            </div>
+        </div>
+        <div class="modal" id="activityLogModal">
+            <div class="modal-content" style="width:600px;max-height:80vh;overflow-y:auto;">
+                <h2>📜 Activity Log</h2>
+                <div id="activityLogContent">
+                    {% for al in activity_logs %}
+                    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
+                        <span style="color:#667eea;font-weight:600;min-width:90px;">{{ al['username'] }}</span>
+                        <span style="flex:1;">{{ al['action'] }}</span>
+                        <span style="color:var(--text-secondary);font-size:11px;">{{ al.get('details','') }}</span>
+                        <span style="color:var(--text-secondary);font-size:11px;min-width:100px;text-align:right;">{{ al['created_at'][:16].replace('T',' ') if al['created_at'] else '' }}</span>
+                    </div>
+                    {% endfor %}
+                    {% if not activity_logs %}
+                    <p style="color:var(--text-secondary);text-align:center;padding:20px;">No activity yet.</p>
+                    {% endif %}
+                </div>
+                <button onclick="closeModal('activityLogModal')" style="background:#ea4335;">Close</button>
+            </div>
+        </div>
+        <div class="modal" id="shareBoardModal">
+            <div class="modal-content">
+                <h2>👥 Share Board</h2>
+                <div style="margin-bottom:15px;">
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <select id="shareUserSelect" style="flex:1;padding:12px;border:2px solid var(--border);border-radius:12px;font-family:'Poppins',sans-serif;background:var(--bg);color:var(--text);">
+                            {% for u in all_users %}
+                            <option value="{{ u['id'] }}">{{ u['username'] }}</option>
+                            {% endfor %}
+                        </select>
+                        <button onclick="shareBoard()" style="padding:12px 20px;margin:0;width:auto;">Share</button>
+                    </div>
+                </div>
+                <div style="margin-bottom:15px;">
+                    <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Shared with:</div>
+                    {% for bs in board_shares %}
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+                        <span style="font-size:14px;">👤 {{ bs['username'] }}</span>
+                        <button class="mini-btn del" onclick="unshareBoard({{ bs['user_id'] }})">Remove</button>
+                    </div>
+                    {% endfor %}
+                    {% if not board_shares %}
+                    <p style="color:var(--text-secondary);font-size:13px;">Not shared with anyone yet.</p>
+                    {% endif %}
+                </div>
+                <button onclick="closeModal('shareBoardModal')" style="background:#ea4335;">Close</button>
+            </div>
+        </div>
+        <div class="modal" id="quickAddModal">
+            <div class="modal-content" style="width:400px;">
+                <h2>⚡ Quick Add Task</h2>
+                <input type="text" id="quickAddTitle" placeholder="Task title" onkeypress="if(event.key==='Enter')submitQuickAdd()">
+                <select id="quickAddList" style="width:100%;padding:12px 16px;margin:8px 0;border:2px solid var(--border);border-radius:12px;font-family:'Poppins',sans-serif;background:var(--bg);color:var(--text);">
+                    {% for lst in lists %}
+                    <option value="{{ lst['id'] }}">{{ lst['name'] }}</option>
+                    {% endfor %}
+                </select>
+                <button onclick="submitQuickAdd()">Add Task</button>
+                <button onclick="closeModal('quickAddModal')" style="background:#ea4335;">Cancel</button>
+            </div>
+        </div>
+        <div id="keyboardHelp" style="display:none;position:fixed;bottom:20px;right:20px;background:var(--card-bg);padding:20px;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:999;max-width:300px;">
+            <h3 style="margin-bottom:10px;font-size:16px;color:var(--text);">⌨️ Keyboard Shortcuts</h3>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:2;">
+                <b>/</b> - Quick add task<br>
+                <b>l</b> - Add new list<br>
+                <b>L</b> - Open label manager<br>
+                <b>s</b> - Focus search<br>
+                <b>d</b> - Toggle dark mode<br>
+                <b>?</b> - Show/hide shortcuts<br>
+                <b>Esc</b> - Close modal
             </div>
         </div>
         <script>
@@ -718,10 +927,283 @@ def board_view(board_id):
                 body: JSON.stringify({task_id: taskId, priority: nextPriority})
             }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
         }
+
+        // Comment functions
+        function addComment(taskId) {
+            const input = document.getElementById('newComment_' + taskId);
+            const body = input.value.trim();
+            if(!body) return;
+            fetch('/api/add_comment', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, body: body})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); });
+        }
+        function deleteComment(commentId) {
+            if(!confirm('Delete this comment?')) return;
+            fetch('/api/delete_comment/' + commentId, { method: 'DELETE' })
+            .then(res => res.json()).then(data => { if(data.success) location.reload(); });
+        }
+
+        // Assignee function
+        function assignTask(taskId, assigneeId) {
+            fetch('/api/assign_task', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, assignee_id: assigneeId || null})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); });
+        }
+
+        // Search & Filter
+        function filterTasks() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const priority = document.getElementById('filterPriority').value;
+            const label = document.getElementById('filterLabel').value.toLowerCase();
+            const assignee = document.getElementById('filterAssignee').value;
+            document.querySelectorAll('.task-card').forEach(card => {
+                const title = card.dataset.title || '';
+                const pri = card.dataset.priority || '';
+                const labels = card.dataset.labels || '';
+                const ass = card.dataset.assignee || '';
+                let show = true;
+                if(query && !title.includes(query)) show = false;
+                if(priority && pri !== priority) show = false;
+                if(label && !labels.includes(label)) show = false;
+                if(assignee && ass !== assignee) show = false;
+                card.style.display = show ? '' : 'none';
+            });
+        }
+        function clearFilters() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('filterPriority').value = '';
+            document.getElementById('filterLabel').value = '';
+            document.getElementById('filterAssignee').value = '';
+            filterTasks();
+        }
+
+        // Dark Mode
+        function toggleDark() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            localStorage.setItem('theme', isDark ? 'light' : 'dark');
+            document.getElementById('darkBtn').textContent = isDark ? '🌙' : '☀️';
+        }
+        (function() {
+            const saved = localStorage.getItem('theme');
+            if(saved === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                document.getElementById('darkBtn').textContent = '☀️';
+            }
+        })();
+
+        // Activity Log
+        function openActivityLog() { openModal('activityLogModal'); }
+
+        // Board Sharing
+        function openShareBoard() { openModal('shareBoardModal'); }
+        function shareBoard() {
+            const userId = document.getElementById('shareUserSelect').value;
+            fetch('/api/share_board', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({board_id: {{ board['id'] }}, user_id: parseInt(userId)})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+        function unshareBoard(userId) {
+            fetch('/api/unshare_board', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({board_id: {{ board['id'] }}, user_id: userId})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); });
+        }
+
+        // Recurring Tasks
+        function setRecurring(taskId, current) {
+            const options = ['', 'daily', 'weekly', 'monthly', 'yearly'];
+            const idx = options.indexOf(current || '');
+            const next = options[(idx + 1) % options.length];
+            fetch('/api/set_recurring', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({task_id: taskId, recurring: next || null})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); });
+        }
+
+        // Quick Add
+        function openQuickAdd() { openModal('quickAddModal'); document.getElementById('quickAddTitle').focus(); }
+        function submitQuickAdd() {
+            const title = document.getElementById('quickAddTitle').value.trim();
+            const listId = document.getElementById('quickAddList').value;
+            if(!title) { alert('Enter a task title!'); return; }
+            fetch('/api/add_card', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({list_id: listId, title: title})
+            }).then(res => res.json()).then(data => { if(data.success) location.reload(); else alert('Error: ' + data.error); });
+        }
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', function(e) {
+            if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+            switch(e.key) {
+                case '/': e.preventDefault(); openQuickAdd(); break;
+                case 'l': e.preventDefault(); openAddList({{ board['id'] }}); break;
+                case 'L': e.preventDefault(); openLabelManager(); break;
+                case 's': e.preventDefault(); document.getElementById('searchInput').focus(); break;
+                case 'd': e.preventDefault(); toggleDark(); break;
+                case '?': e.preventDefault(); document.getElementById('keyboardHelp').style.display = document.getElementById('keyboardHelp').style.display === 'none' ? 'block' : 'none'; break;
+                case 'Escape':
+                    document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+                    document.getElementById('keyboardHelp').style.display = 'none';
+                    break;
+            }
+        });
         </script>
     </body>
     </html>
-    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, today=date.today().isoformat())
+    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, comments_by_task=comments_by_task, all_users=all_users, activity_logs=activity_logs, board_shares=board_shares, today=date.today().isoformat())
+
+# ============ ACTIVITY LOG HELPER ============
+def log_activity(board_id, action, details=''):
+    try:
+        supabase.table('activity_log').insert({
+            'board_id': board_id,
+            'user_id': session.get('user_id'),
+            'action': action,
+            'details': details
+        }).execute()
+    except Exception as e:
+        print(f"activity log warning: {e}")
+
+# ============ EXPORT CSV ============
+@app.route('/api/export_board/<int:board_id>')
+def export_board(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    if not is_owner_or_admin(board_id): return jsonify({'error': 'Permission denied'}), 403
+    import csv, io
+    tasks = supabase.table('tasks').select('*, board_lists(name)').eq('board_id', board_id).order('position').execute().data
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', 'Title', 'Description', 'List', 'Priority', 'Status', 'Due Date', 'Assignee ID', 'Created At'])
+    for t in tasks:
+        list_info = t.pop('board_lists', None)
+        writer.writerow([
+            t['id'], t['title'], t.get('description', ''),
+            list_info['name'] if list_info else '',
+            t.get('priority', ''), t.get('status', ''),
+            t.get('due_date', ''), t.get('assignee_id', ''),
+            t.get('created_at', '')
+        ])
+    track_event(session['user_id'], 'board_exported', {'board_id': board_id})
+    from flask import Response
+    return Response(
+        '\ufeff' + output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=board_{board_id}_export.csv'}
+    )
+
+# ============ BOARD SHARING API ============
+@app.route('/api/share_board', methods=['POST'])
+def share_board():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    board_id = data.get('board_id')
+    target_user_id = data.get('user_id')
+    if not board_id or not target_user_id: return jsonify({'error': 'Invalid data'}), 400
+    if not is_owner_or_admin(board_id): return jsonify({'error': 'Permission denied'}), 403
+    try:
+        supabase.table('board_shares').insert({'board_id': board_id, 'user_id': target_user_id}).execute()
+    except:
+        pass
+    track_event(session['user_id'], 'board_shared', {'board_id': board_id, 'shared_with': target_user_id})
+    return jsonify({'success': True})
+
+@app.route('/api/unshare_board', methods=['POST'])
+def unshare_board():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    board_id = data.get('board_id')
+    target_user_id = data.get('user_id')
+    if not board_id or not target_user_id: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('board_shares').delete().eq('board_id', board_id).eq('user_id', target_user_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/board_shares/<int:board_id>')
+def get_board_shares(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    shares = supabase.table('board_shares').select('*, users(username)').eq('board_id', board_id).execute().data
+    result = []
+    for s in shares:
+        u = s.pop('users', None)
+        result.append({'id': s['id'], 'user_id': s['user_id'], 'username': u['username'] if u else ''})
+    return jsonify(result)
+
+# ============ ACTIVITY LOG API ============
+@app.route('/api/activity_log/<int:board_id>')
+def get_activity_log(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    logs = supabase.table('activity_log').select('*, users(username)').eq('board_id', board_id).order('created_at', desc=True).limit(50).execute().data
+    result = []
+    for l in logs:
+        u = l.pop('users', None)
+        result.append({'id': l['id'], 'action': l['action'], 'details': l.get('details', ''), 'username': u['username'] if u else '', 'created_at': l.get('created_at', '')})
+    return jsonify(result)
+
+# ============ RECURRING TASKS API ============
+@app.route('/api/set_recurring', methods=['POST'])
+def set_recurring():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    recurring = data.get('recurring')
+    if not task_id: return jsonify({'error': 'Invalid data'}), 400
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    if recurring and recurring not in ('daily', 'weekly', 'monthly', 'yearly'):
+        return jsonify({'error': 'Invalid recurring type'}), 400
+    supabase.table('tasks').update({'recurring': recurring or None}).eq('id', task_id).execute()
+    track_event(session['user_id'], 'task_recurring_set', {'task_id': task_id, 'recurring': recurring})
+    return jsonify({'success': True})
+
+@app.route('/api/check_recurring')
+def check_recurring():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    user = supabase.table('users').select('role').eq('id', session['user_id']).execute().data
+    if not user or user[0].get('role') != 'admin': return jsonify({'error': 'Admin only'}), 403
+    from datetime import timedelta
+    now = datetime.now()
+    recurring = supabase.table('tasks').select('*').not_.is_('recurring', 'null').execute().data
+    created = 0
+    for t in recurring:
+        next_run = t.get('next_run')
+        if next_run and next_run > now.isoformat():
+            continue
+        task_date = t.get('created_at', '')
+        original = supabase.table('tasks').select('*').eq('id', t['id']).execute().data
+        if not original: continue
+        orig = original[0]
+        new_next = None
+        if t['recurring'] == 'daily':
+            new_next = (now + timedelta(days=1)).isoformat()
+        elif t['recurring'] == 'weekly':
+            new_next = (now + timedelta(weeks=1)).isoformat()
+        elif t['recurring'] == 'monthly':
+            new_next = (now + timedelta(days=30)).isoformat()
+        elif t['recurring'] == 'yearly':
+            new_next = (now + timedelta(days=365)).isoformat()
+        supabase.table('tasks').insert({
+            'board_id': orig['board_id'],
+            'list_id': orig['list_id'],
+            'user_id': session['user_id'],
+            'title': orig['title'],
+            'description': orig.get('description'),
+            'priority': orig.get('priority', 'medium'),
+            'due_date': new_next[:10] if new_next else None,
+            'recurring': t['recurring'],
+            'next_run': new_next
+        }).execute()
+        supabase.table('tasks').update({'next_run': new_next}).eq('id', t['id']).execute()
+        created += 1
+    return jsonify({'success': True, 'created': created})
 
 # ============ API ROUTES ============
 
@@ -739,6 +1221,11 @@ def add_list():
         'name': name,
         'position': max_pos + 1
     }).execute()
+    track_event(session['user_id'], 'list_created', {
+        'list_name': name,
+        'board_id': board_id
+    })
+    log_activity(board_id, 'list_created', name)
     return jsonify({'success': True})
 
 @app.route('/api/add_card', methods=['POST'])
@@ -760,6 +1247,12 @@ def add_card():
         'description': data.get('description'),
         'position': max_pos + 1
     }).execute()
+    track_event(session['user_id'], 'task_created', {
+        'title': title,
+        'list_id': list_id,
+        'board_id': board_data[0]['board_id']
+    })
+    log_activity(board_data[0]['board_id'], 'task_created', title)
     return jsonify({'success': True})
 
 @app.route('/api/move_task', methods=['POST'])
@@ -880,6 +1373,41 @@ def delete_attachment(att_id):
     supabase.table('attachments').delete().eq('id', att_id).execute()
     return jsonify({'success': True})
 
+# ============ COMMENT API ============
+@app.route('/api/add_comment', methods=['POST'])
+def add_comment():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    body = (data.get('body') or '').strip()
+    if not task_id or not body: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('comments').insert({
+        'task_id': task_id,
+        'user_id': session['user_id'],
+        'body': body
+    }).execute()
+    track_event(session['user_id'], 'comment_added', {'task_id': task_id})
+    return jsonify({'success': True})
+
+@app.route('/api/delete_comment/<int:comment_id>', methods=['DELETE'])
+def delete_comment(comment_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    supabase.table('comments').delete().eq('id', comment_id).execute()
+    return jsonify({'success': True})
+
+# ============ ASSIGNEE API ============
+@app.route('/api/assign_task', methods=['POST'])
+def assign_task():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    assignee_id = data.get('assignee_id')
+    if not task_id: return jsonify({'error': 'Invalid data'}), 400
+    if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    supabase.table('tasks').update({'assignee_id': assignee_id}).eq('id', task_id).execute()
+    track_event(session['user_id'], 'task_assigned', {'task_id': task_id, 'assignee_id': assignee_id})
+    return jsonify({'success': True})
+
 # ============ BOARD / LIST / TASK MANAGEMENT API ============
 
 def is_owner_or_admin(board_id, user_id=None):
@@ -960,7 +1488,15 @@ def edit_task():
 def delete_task(task_id):
     if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
     if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
+    task_info = supabase.table('tasks').select('board_id, title').eq('id', task_id).execute().data
+    board_id = task_info[0]['board_id'] if task_info else None
+    task_title = task_info[0].get('title', '') if task_info else ''
     supabase.table('tasks').delete().eq('id', task_id).execute()
+    track_event(session['user_id'], 'task_deleted', {
+        'task_id': task_id
+    })
+    if board_id:
+        log_activity(board_id, 'task_deleted', task_title)
     return jsonify({'success': True})
 
 @app.route('/api/set_due_date', methods=['POST'])
@@ -972,6 +1508,10 @@ def set_due_date():
     if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
     due_date = data.get('due_date')
     supabase.table('tasks').update({'due_date': due_date}).eq('id', task_id).execute()
+    track_event(session['user_id'], 'task_due_date_set', {
+        'task_id': task_id,
+        'due_date': due_date
+    })
     return jsonify({'success': True, 'due_date': due_date})
 
 @app.route('/api/toggle_complete/<int:task_id>', methods=['POST'])
@@ -982,6 +1522,13 @@ def toggle_complete(task_id):
     if not _task_owner_ok(task_id): return jsonify({'error': 'Permission denied'}), 403
     new_status = 'completed' if task[0].get('status') != 'completed' else 'pending'
     supabase.table('tasks').update({'status': new_status}).eq('id', task_id).execute()
+    track_event(session['user_id'], 'task_toggled', {
+        'task_id': task_id,
+        'new_status': new_status
+    })
+    task_info = supabase.table('tasks').select('board_id, title').eq('id', task_id).execute().data
+    if task_info:
+        log_activity(task_info[0]['board_id'], 'task_completed' if new_status == 'completed' else 'task_uncompleted', task_info[0].get('title', ''))
     return jsonify({'success': True, 'status': new_status})
 
 @app.route('/api/set_priority', methods=['POST'])
@@ -1024,6 +1571,103 @@ def delete_label(label_id):
 
 # ============ AUTH ROUTES ============
 
+@app.route('/google/login')
+def google_login():
+    if not GOOGLE_CLIENT_ID:
+        flash('Google Login is not configured. Please add GOOGLE_CLIENT_ID.', 'error')
+        return redirect(url_for('login'))
+    
+    import urllib.parse
+    params = {
+        'client_id': GOOGLE_CLIENT_ID,
+        'redirect_uri': request.url_root.rstrip('/') + url_for('google_auth'),
+        'response_type': 'code',
+        'scope': 'openid email profile',
+        'access_type': 'offline',
+        'prompt': 'consent'
+    }
+    auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urllib.parse.urlencode(params)
+    return redirect(auth_url)
+
+@app.route('/google/auth')
+def google_auth():
+    code = request.args.get('code')
+    if not code:
+        flash('Google Login failed.', 'error')
+        return redirect(url_for('login'))
+    
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        'code': code,
+        'client_id': GOOGLE_CLIENT_ID,
+        'client_secret': GOOGLE_CLIENT_SECRET,
+        'redirect_uri': request.url_root.rstrip('/') + url_for('google_auth'),
+        'grant_type': 'authorization_code'
+    }
+    r = requests.post(token_url, data=data)
+    if r.status_code != 200:
+        flash('Failed to retrieve token from Google.', 'error')
+        return redirect(url_for('login'))
+    
+    access_token = r.json().get('access_token')
+    
+    userinfo_url = "https://www.googleapis.com/oauth2/v2/userinfo"
+    headers = {'Authorization': f'Bearer {access_token}'}
+    r_user = requests.get(userinfo_url, headers=headers)
+    user_info = r_user.json()
+    
+    email = user_info.get('email')
+    if not email:
+        flash('Google did not provide an email address.', 'error')
+        return redirect(url_for('login'))
+        
+    username = email.split('@')[0]
+    
+    user_data = supabase.table('users').select('*').eq('email', email).execute().data
+    if user_data:
+        user = user_data[0]
+    else:
+        try:
+            uname_check = supabase.table('users').select('id').eq('username', username).execute().data
+            if uname_check:
+                import random
+                username = f"{username}{random.randint(100,999)}"
+                
+            res = supabase.table('users').insert({
+                'username': username,
+                'email': email,
+                'password': hashlib.sha256(os.urandom(16)).hexdigest(),
+                'role': 'user'
+            }).execute()
+            user = res.data[0]
+            track_event(user['id'], 'user_registered', {
+                'ip': request.remote_addr or '',
+                'has_email': True,
+                'method': 'google'
+            })
+        except Exception as e:
+            flash(f'Error creating account: {str(e)}', 'error')
+            return redirect(url_for('login'))
+            
+    session['user_id'] = user['id']
+    session['username'] = user['username']
+    try:
+        supabase.table('login_logs').insert({
+            'user_id': user['id'],
+            'username': user['username'],
+            'email': user.get('email') or '',
+            'ip': request.remote_addr or ''
+        }).execute()
+    except:
+        pass
+    track_event(user['id'], 'user_logged_in', {
+        'username': user['username'],
+        'method': 'google'
+    })
+    
+    flash(f'Welcome, {user["username"]}!', 'success')
+    return redirect(url_for('boards_page'))
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session: return redirect(url_for('boards_page'))
@@ -1044,6 +1688,11 @@ def login():
                 }).execute()
             except Exception as e:
                 print(f"login log warning: {e}")
+            track_event(user['id'], 'user_logged_in', {
+                'username': user['username'],
+                'ip': request.remote_addr or '',
+                'source': 'login_page'
+            })
             threading.Thread(
                 target=notify_login,
                 args=(user['username'], user.get('email') or '', request.remote_addr or ''),
@@ -1051,6 +1700,9 @@ def login():
             ).start()
             flash(f'Welcome back, {user["username"]}!', 'success')
             return redirect(url_for('boards_page'))
+        track_event(request.form.get('username', '') or 'unknown', 'login_failed', {
+            'ip': request.remote_addr or ''
+        })
         flash('Invalid username or password!', 'error')
     return render_template_string(LOGIN_PAGE)
 
@@ -1074,6 +1726,10 @@ def register():
                     'password': hashlib.sha256(password.encode()).hexdigest(),
                     'email': email or None
                 }).execute()
+                track_event(username, 'user_registered', {
+                    'ip': request.remote_addr or '',
+                    'has_email': bool(email)
+                })
                 flash('Account created! Please login.', 'success')
             return redirect(url_for('login'))
     return render_template_string(REGISTER_PAGE)
@@ -1206,7 +1862,7 @@ LOGIN_PAGE = '''
 <style>body{font-family:'Poppins',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:white;padding:40px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,0.1);max-width:400px;width:90%}h1{color:#1a73e8;text-align:center}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:8px}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer}.links{text-align:center;margin-top:20px}.flash{padding:12px;border-radius:8px;margin-bottom:15px}.flash-success{background:#e6f4ea;color:#137333}.flash-error{background:#fce8e6;color:#c5221f}</style></head>
 <body><div class="login-box"><h1>📋 Task Manager</h1><p style="text-align:center;color:#5f6368;">Login to manage your boards</p>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
-<form method="POST"><input type="text" name="username" placeholder="Username" required><input type="password" name="password" placeholder="Password" required><button type="submit">🔑 Login</button></form>
+<form method="POST"><input type="text" name="username" placeholder="Username" required><input type="password" name="password" placeholder="Password" required><button type="submit">🔑 Login</button></form><a href="/google/login" style="display:block;width:100%;padding:12px;background:#fff;color:#333;border:1px solid #ddd;border-radius:8px;text-align:center;text-decoration:none;margin-top:10px;box-sizing:border-box;">?? Continue with Google</a>
 <div class="links">Don't have an account? <a href="/register" style="color:#1a73e8;text-decoration:none;">Register here</a></div></div></body></html>
 '''
 
@@ -1216,9 +1872,11 @@ REGISTER_PAGE = '''
 <style>body{font-family:'Poppins',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.register-box{background:white;padding:40px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,0.1);max-width:400px;width:90%}h1{color:#1a73e8;text-align:center}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:8px}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer}.links{text-align:center;margin-top:20px}.flash{padding:12px;border-radius:8px;margin-bottom:15px}.flash-success{background:#e6f4ea;color:#137333}.flash-error{background:#fce8e6;color:#c5221f}</style></head>
 <body><div class="register-box"><h1>📋 Task Manager</h1><p style="text-align:center;color:#5f6368;">Create a new account</p>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
-<form method="POST"><input type="text" name="username" placeholder="Choose a username" required><input type="email" name="email" placeholder="Email (optional)"><input type="password" name="password" placeholder="Password (min 4 chars)" required><input type="password" name="confirm_password" placeholder="Confirm password" required><button type="submit">✅ Register</button></form>
+<form method="POST"><input type="text" name="username" placeholder="Choose a username" required><input type="email" name="email" placeholder="Email (optional)"><input type="password" name="password" placeholder="Password (min 4 chars)" required><input type="password" name="confirm_password" placeholder="Confirm password" required><button type="submit">✅ Register</button></form><a href="/google/login" style="display:block;width:100%;padding:12px;background:#fff;color:#333;border:1px solid #ddd;border-radius:8px;text-align:center;text-decoration:none;margin-top:10px;box-sizing:border-box;">?? Continue with Google</a>
 <div class="links">Already have an account? <a href="/login" style="color:#1a73e8;text-decoration:none;">Login here</a></div></div></body></html>
 '''
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
+
