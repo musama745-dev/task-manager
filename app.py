@@ -328,6 +328,17 @@ def board_view(board_id):
             comments_by_task[cm['task_id']].append(cm)
     all_labels = supabase.table('labels').select('*').execute().data
     all_users = supabase.table('users').select('id, username').execute().data
+    # Fetch dependencies
+    deps_by_task = {tid: [] for tid in task_ids}
+    if task_ids:
+        try:
+            all_deps = supabase.table('task_dependencies').select('*, tasks!task_dependencies_blocked_by_id_fkey(title)').execute().data
+            for d in all_deps:
+                bt = d.pop('tasks', None)
+                if d.get('task_id') in deps_by_task:
+                    deps_by_task[d['task_id']].append({'id': d['id'], 'blocked_by_id': d['blocked_by_id'], 'blocked_by_title': bt['title'] if bt else ''})
+        except:
+            pass
     # Activity log
     activity_logs = []
     try:
@@ -436,6 +447,25 @@ def board_view(board_id):
             .modal-close:hover { color: var(--text); transform: rotate(90deg); }
             .dark-toggle { background: var(--card-bg); border: 2px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 12px; cursor: pointer; font-size: 18px; transition: 0.3s; }
             .dark-toggle:hover { transform: scale(1.1); }
+            .bulk-bar { display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--card-bg); padding:12px 24px; border-radius:16px; box-shadow:0 10px 40px rgba(0,0,0,0.2); z-index:900; gap:10px; align-items:center; }
+            .bulk-bar.active { display:flex; }
+            .bulk-bar button { padding:8px 16px; border:none; border-radius:10px; cursor:pointer; font-weight:600; font-family:'Poppins',sans-serif; font-size:13px; }
+            .bulk-bar .bulk-move { background:#667eea; color:white; }
+            .bulk-bar .bulk-complete { background:#34a853; color:white; }
+            .bulk-bar .bulk-delete { background:#ea4335; color:white; }
+            .bulk-bar .bulk-cancel { background:var(--border); color:var(--text); }
+            .undo-toast { display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:#333; color:white; padding:12px 24px; border-radius:12px; z-index:999; font-size:14px; align-items:center; gap:10px; }
+            .undo-toast.show { display:flex; }
+            .undo-toast button { background:#667eea; color:white; border:none; padding:6px 14px; border-radius:8px; cursor:pointer; font-weight:600; font-family:'Poppins',sans-serif; }
+            .timer-btn { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:12px; font-size:11px; font-weight:600; border:none; cursor:pointer; font-family:'Poppins',sans-serif; }
+            .timer-btn.start { background:#dcfce7; color:#166534; }
+            .timer-btn.stop { background:#fee2e2; color:#991b2b; }
+            .timer-info { font-size:11px; color:var(--text-secondary); margin-top:4px; }
+            .recurring-btn { display:inline-block; padding:2px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; border:none; font-family:'Poppins',sans-serif; background:#e8eaf6; color:#283593; }
+            .recurring-btn.active { background:#667eea; color:white; }
+            .reminder-btn { padding:2px 8px; border-radius:6px; font-size:11px; cursor:pointer; border:none; background:var(--border); color:var(--text); font-family:'Poppins',sans-serif; }
+            .dependency-tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:600; background:#fff3e0; color:#e65100; margin:2px 0; }
+            .bulk-checkbox { width:16px; height:16px; accent-color:#667eea; cursor:pointer; margin-right:6px; }
         </style>
     </head>
     <body>
@@ -444,6 +474,10 @@ def board_view(board_id):
                 <h1>📋 {{ board['name'] }}</h1>
                 <div class="header-actions">
                     <button class="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" id="darkBtn">🌙</button>
+                    <a href="/calendar/{{ board['id'] }}" class="btn-sm" style="text-decoration:none;">📅 Calendar</a>
+                    <a href="/gantt/{{ board['id'] }}" class="btn-sm" style="text-decoration:none;">📊 Gantt</a>
+                    <button class="btn-sm" onclick="openTemplateModal()">📋 Templates</button>
+                    <button class="btn-sm" onclick="openThemePicker()">🎨 Theme</button>
                     <button class="btn-sm" onclick="openActivityLog()">📜 Activity</button>
                     <button class="btn-sm" onclick="openShareBoard()">👥 Share</button>
                     <button class="btn-sm" onclick="window.location='/api/export_board/{{ board['id'] }}'">📥 Export CSV</button>
@@ -497,6 +531,7 @@ def board_view(board_id):
                         {% for task in tasks if task['list_id'] == lst['id'] %}
                         <div class="task-card{% if task['status'] == 'completed' %} completed{% endif %}" draggable="true" data-task-id="{{ task['id'] }}" data-list-id="{{ task['list_id'] }}" data-title="{{ task['title']|lower }}" data-priority="{{ task['priority'] or 'medium' }}" data-labels="{{ labels_by_task[task['id']]|map(attribute='name')|join(',')|lower }}" data-assignee="{{ task.get('assignee_id') or '' }}">
                             <div class="task-header">
+                                <input type="checkbox" class="bulk-checkbox" data-task-id="{{ task['id'] }}" onchange="updateBulkBar()" title="Select for bulk action">
                                 <input type="checkbox" class="completion-checkbox" {% if task['status'] == 'completed' %}checked{% endif %} onchange="toggleComplete({{ task['id'] }}, this.checked)" title="Mark complete">
                                 <div style="flex:1;">
                                     <div class="card-title">{{ task['title'] }}</div>
@@ -514,6 +549,10 @@ def board_view(board_id):
                                 {% else %}
                                 <button class="due-date on-time" onclick="setDueDate({{ task['id'] }}, '')" title="Set due date">📅 Set due date</button>
                                 {% endif %}
+                                {% set rec = task.get('recurring') or '' %}
+                                <button class="recurring-btn{% if rec %} active{% endif %}" onclick="setRecurring({{ task['id'] }}, '{{ rec }}')" title="Set recurring">🔄 {{ rec or 'One-time' }}</button>
+                                <button class="timer-btn start" onclick="startTimer({{ task['id'] }})" title="Start timer">▶ Timer</button>
+                                <button class="reminder-btn" onclick="setReminder({{ task['id'] }})" title="Set reminder">🔔</button>
                             </div>
                             <!-- Labels -->
                             <div class="labels-container" style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;">
@@ -521,6 +560,14 @@ def board_view(board_id):
                                 <span style="background:{{ label['color'] }};padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:white;">{{ label['name'] }}</span>
                                 {% endfor %}
                             </div>
+                            <!-- Dependencies -->
+                            {% if deps_by_task[task['id']] %}
+                            <div style="margin:4px 0;">
+                                {% for dep in deps_by_task[task['id']] %}
+                                <span class="dependency-tag">🔒 Blocked by: {{ dep['blocked_by_title'] }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
 
                             <!-- Assignee -->
                             <div style="margin:6px 0;">
@@ -580,9 +627,10 @@ def board_view(board_id):
                                     <span class="comment-del" onclick="deleteComment({{ cm['id'] }})">✕</span>
                                 </div>
                                 {% endfor %}
-                                <div class="comment-input-row">
-                                    <input type="text" id="newComment_{{ task['id'] }}" placeholder="Write a comment..." onkeypress="if(event.key==='Enter')addComment({{ task['id'] }})">
+                                <div class="comment-input-row" style="position:relative;">
+                                    <input type="text" id="newComment_{{ task['id'] }}" placeholder="Write a comment... (@ to mention)" oninput="checkMention(this)" onkeypress="if(event.key==='Enter')addComment({{ task['id'] }})">
                                     <button onclick="addComment({{ task['id'] }})">Send</button>
+                                    <div class="mention-dropdown" id="mention_{{ task['id'] }}" style="display:none;position:absolute;bottom:100%;left:0;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:10;max-height:120px;overflow-y:auto;min-width:150px;"></div>
                                 </div>
                             </div>
                         </div>
@@ -708,6 +756,63 @@ def board_view(board_id):
                 <b>d</b> - Toggle dark mode<br>
                 <b>?</b> - Show/hide shortcuts<br>
                 <b>Esc</b> - Close modal
+            </div>
+        </div>
+        <div class="bulk-bar" id="bulkBar">
+            <span id="bulkCount" style="font-weight:600;font-size:13px;color:var(--text);">0 selected</span>
+            <select id="bulkMoveTarget" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-family:'Poppins',sans-serif;background:var(--bg);color:var(--text);">
+                {% for lst in lists %}
+                <option value="{{ lst['id'] }}">{{ lst['name'] }}</option>
+                {% endfor %}
+            </select>
+            <button class="bulk-move" onclick="bulkMove()">📦 Move</button>
+            <button class="bulk-complete" onclick="bulkComplete()">✅ Complete</button>
+            <button class="bulk-delete" onclick="bulkDelete()">🗑️ Delete</button>
+            <button class="bulk-cancel" onclick="clearBulk()">✕ Cancel</button>
+        </div>
+        <div class="undo-toast" id="undoToast">
+            <span id="undoMsg">Action done</span>
+            <button onclick="doUndo()">Undo</button>
+        </div>
+        <div class="modal" id="templateModal">
+            <div class="modal-content" style="width:550px;">
+                <span class="modal-close" onclick="closeModal('templateModal')">&times;</span>
+                <h2>📋 Task Templates</h2>
+                <div style="margin-bottom:15px;">
+                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Create new template:</div>
+                    <input type="text" id="tmplName" placeholder="Template name" style="margin-bottom:6px;">
+                    <div id="tmplTaskList"></div>
+                    <button onclick="addTmplTask()" style="width:auto;padding:8px 16px;margin:6px 0;font-size:13px;">+ Add task to template</button>
+                    <button onclick="saveTemplate()" style="margin-top:6px;">Save Template</button>
+                </div>
+                <div style="border-top:1px solid var(--border);padding-top:12px;">
+                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Existing templates:</div>
+                    <div id="tmplList"></div>
+                </div>
+                <button onclick="closeModal('templateModal')" style="background:#ea4335;">Close</button>
+            </div>
+        </div>
+        <div class="modal" id="themePickerModal">
+            <div class="modal-content" style="width:400px;">
+                <span class="modal-close" onclick="closeModal('themePickerModal')">&times;</span>
+                <h2>🎨 Board Theme</h2>
+                <div style="margin:15px 0;">
+                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Background Color:</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <div onclick="setTheme('#f0f2f5','')" style="width:40px;height:40px;border-radius:10px;background:#f0f2f5;border:3px solid var(--border);cursor:pointer;" title="Default"></div>
+                        <div onclick="setTheme('#e8f5e9','')" style="width:40px;height:40px;border-radius:10px;background:#e8f5e9;border:3px solid var(--border);cursor:pointer;" title="Green"></div>
+                        <div onclick="setTheme('#e3f2fd','')" style="width:40px;height:40px;border-radius:10px;background:#e3f2fd;border:3px solid var(--border);cursor:pointer;" title="Blue"></div>
+                        <div onclick="setTheme('#fce4ec','')" style="width:40px;height:40px;border-radius:10px;background:#fce4ec;border:3px solid var(--border);cursor:pointer;" title="Pink"></div>
+                        <div onclick="setTheme('#fff3e0','')" style="width:40px;height:40px;border-radius:10px;background:#fff3e0;border:3px solid var(--border);cursor:pointer;" title="Orange"></div>
+                        <div onclick="setTheme('#f3e5f5','')" style="width:40px;height:40px;border-radius:10px;background:#f3e5f5;border:3px solid var(--border);cursor:pointer;" title="Purple"></div>
+                    </div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin:12px 0 8px;">Custom color:</div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input type="color" id="customThemeColor" value="#f0f2f5" style="width:50px;padding:2px;margin:0;">
+                        <button onclick="setTheme(document.getElementById('customThemeColor').value,'')" style="width:auto;padding:8px 16px;margin:0;font-size:13px;">Apply</button>
+                    </div>
+                </div>
+                <button onclick="closeModal('themePickerModal')" style="background:#ea4335;">Close</button>
             </div>
         </div>
         <script>
@@ -1058,10 +1163,173 @@ def board_view(board_id):
                     break;
             }
         });
+
+        // Time Tracking
+        function startTimer(taskId) {
+            fetch('/api/start_timer', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task_id:taskId}) })
+            .then(r=>r.json()).then(d=>{ if(d.success) location.reload(); else alert('Error: '+d.error); });
+        }
+
+        // Bulk Actions
+        function getSelectedIds() {
+            const ids = [];
+            document.querySelectorAll('.bulk-checkbox:checked').forEach(cb => ids.push(parseInt(cb.dataset.taskId)));
+            return ids;
+        }
+        function updateBulkBar() {
+            const ids = getSelectedIds();
+            const bar = document.getElementById('bulkBar');
+            if(ids.length > 0) {
+                bar.classList.add('active');
+                document.getElementById('bulkCount').textContent = ids.length + ' selected';
+            } else {
+                bar.classList.remove('active');
+            }
+        }
+        function clearBulk() {
+            document.querySelectorAll('.bulk-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('bulkBar').classList.remove('active');
+        }
+        function bulkMove() {
+            const ids = getSelectedIds();
+            const listId = document.getElementById('bulkMoveTarget').value;
+            if(!ids.length) return;
+            fetch('/api/bulk_move', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task_ids:ids, list_id:parseInt(listId)}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ showUndo('Moved '+d.moved+' tasks'); location.reload(); } else alert('Error: '+d.error); });
+        }
+        function bulkComplete() {
+            const ids = getSelectedIds();
+            if(!ids.length) return;
+            fetch('/api/bulk_complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task_ids:ids, status:'completed'}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ showUndo('Completed '+d.updated+' tasks'); location.reload(); } else alert('Error: '+d.error); });
+        }
+        function bulkDelete() {
+            const ids = getSelectedIds();
+            if(!ids.length || !confirm('Delete '+ids.length+' tasks?')) return;
+            fetch('/api/bulk_delete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task_ids:ids}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ showUndo('Deleted '+d.deleted+' tasks'); location.reload(); } else alert('Error: '+d.error); });
+        }
+
+        // Undo
+        let undoTimer = null;
+        function showUndo(msg) {
+            document.getElementById('undoMsg').textContent = msg;
+            document.getElementById('undoToast').classList.add('show');
+            if(undoTimer) clearTimeout(undoTimer);
+            undoTimer = setTimeout(() => document.getElementById('undoToast').classList.remove('show'), 5000);
+        }
+        function doUndo() {
+            fetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ showUndo('Undid: '+d.action); location.reload(); } else alert('Nothing to undo'); });
+            document.getElementById('undoToast').classList.remove('show');
+        }
+
+        // Templates
+        let tmplTasks = [];
+        function openTemplateModal() {
+            document.getElementById('tmplName').value = '';
+            tmplTasks = [];
+            document.getElementById('tmplTaskList').innerHTML = '';
+            loadTemplates();
+            openModal('templateModal');
+        }
+        function addTmplTask() {
+            tmplTasks.push({title:'', description:'', priority:'medium'});
+            renderTmplTasks();
+        }
+        function renderTmplTasks() {
+            let html = '';
+            tmplTasks.forEach((t,i) => {
+                html += '<div style="display:flex;gap:6px;margin:4px 0;align-items:center;">';
+                html += '<input type="text" value="'+t.title+'" placeholder="Task title" onchange="tmplTasks['+i+'].title=this.value" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:Poppins,sans-serif;background:var(--bg);color:var(--text);">';
+                html += '<select onchange="tmplTasks['+i+'].priority=this.value" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:Poppins,sans-serif;background:var(--bg);color:var(--text);">';
+                ['low','medium','high'].forEach(p => html += '<option value="'+p+'"'+(t.priority===p?' selected':'')+'>'+p+'</option>');
+                html += '</select>';
+                html += '<button onclick="tmplTasks.splice('+i+',1);renderTmplTasks()" style="padding:4px 8px;background:#ea4335;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">✕</button>';
+                html += '</div>';
+            });
+            document.getElementById('tmplTaskList').innerHTML = html;
+        }
+        function saveTemplate() {
+            const name = document.getElementById('tmplName').value.trim();
+            if(!name) { alert('Enter template name!'); return; }
+            const validTasks = tmplTasks.filter(t => t.title.trim());
+            if(!validTasks.length) { alert('Add at least one task!'); return; }
+            fetch('/api/create_template', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name, board_id:{{ board['id'] }}, tasks:validTasks}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ alert('Template saved!'); loadTemplates(); } else alert('Error: '+d.error); });
+        }
+        function loadTemplates() {
+            fetch('/api/templates/{{ board['id'] }}').then(r=>r.json()).then(data => {
+                let html = '';
+                if(!data.length) html = '<p style="color:var(--text-secondary);font-size:13px;">No templates yet.</p>';
+                data.forEach(t => {
+                    const count = Array.isArray(t.tasks_json) ? t.tasks_json.length : 0;
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">';
+                    html += '<span style="font-size:14px;font-weight:500;">'+t.name+' <span style="color:var(--text-secondary);font-size:12px;">('+count+' tasks)</span></span>';
+                    html += '<div style="display:flex;gap:6px;">';
+                    html += '<button class="mini-btn" onclick="useTmpl('+t.id+')" style="background:#667eea;color:white;">Use</button>';
+                    html += '<button class="mini-btn del" onclick="delTmpl('+t.id+')">Delete</button>';
+                    html += '</div></div>';
+                });
+                document.getElementById('tmplList').innerHTML = html;
+            });
+        }
+        function useTmpl(tmplId) {
+            const listId = prompt('Enter list ID to add tasks to (or check the board):');
+            if(!listId) return;
+            fetch('/api/use_template', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({template_id:tmplId, list_id:parseInt(listId)}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ alert('Added '+d.count+' tasks!'); location.reload(); } else alert('Error: '+d.error); });
+        }
+        function delTmpl(tmplId) {
+            if(!confirm('Delete this template?')) return;
+            fetch('/api/delete_template/'+tmplId, {method:'DELETE'}).then(r=>r.json()).then(d=>{ if(d.success) loadTemplates(); });
+        }
+
+        // Theme Picker
+        function openThemePicker() { openModal('themePickerModal'); }
+        function setTheme(color, bg) {
+            fetch('/api/update_theme', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({board_id:{{ board['id'] }}, theme_color:color, theme_bg:bg||null}) })
+            .then(r=>r.json()).then(d=>{ if(d.success){ document.body.style.background = color; closeModal('themePickerModal'); } });
+        }
+
+        // Reminder
+        function setReminder(taskId) {
+            const dt = prompt('Remind at (YYYY-MM-DD HH:MM):', '');
+            if(!dt) return;
+            const msg = prompt('Reminder message:', '') || '';
+            fetch('/api/set_reminder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task_id:taskId, remind_at:dt, message:msg}) })
+            .then(r=>r.json()).then(d=>{ if(d.success) alert('Reminder set!'); else alert('Error: '+d.error); });
+        }
+
+        // Real-time polling (every 30s)
+        setInterval(() => { if(!document.hidden) location.reload(); }, 30000);
+
+        // @Mentions
+        const allUsers = [{% for u in all_users %}{id:{{ u['id'] }},name:'{{ u['username'] }}'}{% if not loop.last %},{% endif %}{% endfor %}];
+        function checkMention(input) {
+            const val = input.value;
+            const atIdx = val.lastIndexOf('@');
+            const ddId = 'mention_' + input.id.split('_')[1];
+            const dd = document.getElementById(ddId);
+            if(!dd) return;
+            if(atIdx === -1 || atIdx !== val.length - 1) { dd.style.display = 'none'; return; }
+            const query = val.slice(atIdx + 1).toLowerCase();
+            const matches = allUsers.filter(u => u.name.toLowerCase().includes(query));
+            if(!matches.length) { dd.style.display = 'none'; return; }
+            dd.innerHTML = matches.map(u => '<div style="padding:6px 10px;cursor:pointer;font-size:13px;" onmousedown="insertMention('+input.id.split('_')[1]+',\''+u.name+'\')">@'+u.name+'</div>').join('');
+            dd.style.display = 'block';
+        }
+        function insertMention(taskId, username) {
+            const input = document.getElementById('newComment_' + taskId);
+            const atIdx = input.value.lastIndexOf('@');
+            input.value = input.value.slice(0, atIdx) + '@' + username + ' ';
+            document.getElementById('mention_' + taskId).style.display = 'none';
+            input.focus();
+        }
         </script>
     </body>
     </html>
-    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, comments_by_task=comments_by_task, all_users=all_users, activity_logs=activity_logs, board_shares=board_shares, today=date.today().isoformat())
+    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, comments_by_task=comments_by_task, all_users=all_users, activity_logs=activity_logs, board_shares=board_shares, today=date.today().isoformat(), deps_by_task=deps_by_task)
 
 # ============ ACTIVITY LOG HELPER ============
 def log_activity(board_id, action, details=''):
@@ -1408,6 +1676,283 @@ def assign_task():
     track_event(session['user_id'], 'task_assigned', {'task_id': task_id, 'assignee_id': assignee_id})
     return jsonify({'success': True})
 
+# ============ TIME TRACKING API ============
+@app.route('/api/start_timer', methods=['POST'])
+def start_timer():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    if not task_id: return jsonify({'error': 'Invalid data'}), 400
+    from datetime import timezone
+    supabase.table('time_entries').insert({
+        'task_id': task_id,
+        'user_id': session['user_id'],
+        'start_time': datetime.now(timezone.utc).isoformat()
+    }).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/stop_timer', methods=['POST'])
+def stop_timer():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    entry_id = data.get('entry_id')
+    if not entry_id: return jsonify({'error': 'Invalid data'}), 400
+    from datetime import timezone
+    entry = supabase.table('time_entries').select('*').eq('id', entry_id).execute().data
+    if not entry: return jsonify({'error': 'Entry not found'}), 404
+    now = datetime.now(timezone.utc)
+    start = datetime.fromisoformat(entry[0]['start_time'].replace('Z', '+00:00'))
+    duration = int((now - start).total_seconds())
+    supabase.table('time_entries').update({
+        'end_time': now.isoformat(),
+        'duration_seconds': duration
+    }).eq('id', entry_id).execute()
+    return jsonify({'success': True, 'duration': duration})
+
+@app.route('/api/time_entries/<int:task_id>')
+def get_time_entries(task_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    entries = supabase.table('time_entries').select('*').eq('task_id', task_id).order('created_at', desc=True).execute().data
+    return jsonify(entries)
+
+@app.route('/api/timer_status/<int:task_id>')
+def timer_status(task_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    entries = supabase.table('time_entries').select('*').eq('task_id', task_id).is_('end_time', 'null').execute().data
+    running = entries[0] if entries else None
+    all_entries = supabase.table('time_entries').select('duration_seconds').eq('task_id', task_id).execute().data
+    total = sum(e.get('duration_seconds', 0) for e in all_entries)
+    return jsonify({'running': running, 'total_seconds': total})
+
+# ============ TASK DEPENDENCIES API ============
+@app.route('/api/add_dependency', methods=['POST'])
+def add_dependency():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    blocked_by_id = data.get('blocked_by_id')
+    if not task_id or not blocked_by_id or task_id == blocked_by_id:
+        return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('task_dependencies').insert({
+        'task_id': task_id,
+        'blocked_by_id': blocked_by_id
+    }).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/remove_dependency', methods=['POST'])
+def remove_dependency():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    dep_id = data.get('dep_id')
+    if not dep_id: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('task_dependencies').delete().eq('id', dep_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/dependencies/<int:board_id>')
+def get_dependencies(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    deps = supabase.table('task_dependencies').select('*, tasks!task_dependencies_blocked_by_id_fkey(title)').execute().data
+    result = []
+    for d in deps:
+        bt = d.pop('tasks', None)
+        result.append({'id': d['id'], 'task_id': d['task_id'], 'blocked_by_id': d['blocked_by_id'], 'blocked_by_title': bt['title'] if bt else ''})
+    return jsonify(result)
+
+# ============ TASK TEMPLATES API ============
+@app.route('/api/create_template', methods=['POST'])
+def create_template():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    board_id = data.get('board_id')
+    tasks = data.get('tasks', [])
+    if not name or not board_id: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('task_templates').insert({
+        'name': name,
+        'board_id': board_id,
+        'tasks_json': tasks
+    }).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/templates/<int:board_id>')
+def get_templates(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    templates = supabase.table('task_templates').select('*').eq('board_id', board_id).execute().data
+    return jsonify(templates)
+
+@app.route('/api/use_template', methods=['POST'])
+def use_template():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    template_id = data.get('template_id')
+    list_id = data.get('list_id')
+    if not template_id or not list_id: return jsonify({'error': 'Invalid data'}), 400
+    tmpl = supabase.table('task_templates').select('*').eq('id', template_id).execute().data
+    if not tmpl: return jsonify({'error': 'Template not found'}), 404
+    tasks_json = tmpl[0]['tasks_json']
+    board_data = supabase.table('board_lists').select('board_id').eq('id', list_id).execute().data
+    if not board_data: return jsonify({'error': 'List not found'}), 404
+    board_id = board_data[0]['board_id']
+    for t in tasks_json:
+        supabase.table('tasks').insert({
+            'board_id': board_id,
+            'list_id': list_id,
+            'user_id': session['user_id'],
+            'title': t.get('title', 'Untitled'),
+            'description': t.get('description', ''),
+            'priority': t.get('priority', 'medium')
+        }).execute()
+    return jsonify({'success': True, 'count': len(tasks_json)})
+
+@app.route('/api/delete_template/<int:template_id>', methods=['DELETE'])
+def delete_template(template_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    supabase.table('task_templates').delete().eq('id', template_id).execute()
+    return jsonify({'success': True})
+
+# ============ BOARD ROLES API ============
+@app.route('/api/set_board_role', methods=['POST'])
+def set_board_role():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    board_id = data.get('board_id')
+    target_user_id = data.get('user_id')
+    role = data.get('role', 'editor')
+    if not board_id or not target_user_id: return jsonify({'error': 'Invalid data'}), 400
+    if role not in ('viewer', 'editor', 'admin'): return jsonify({'error': 'Invalid role'}), 400
+    if not is_owner_or_admin(board_id): return jsonify({'error': 'Permission denied'}), 403
+    try:
+        supabase.table('board_roles').upsert({
+            'board_id': board_id,
+            'user_id': target_user_id,
+            'role': role
+        }).execute()
+    except:
+        supabase.table('board_roles').update({'role': role}).eq('board_id', board_id).eq('user_id', target_user_id).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/board_roles/<int:board_id>')
+def get_board_roles(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    roles = supabase.table('board_roles').select('*, users(username)').eq('board_id', board_id).execute().data
+    result = []
+    for r in roles:
+        u = r.pop('users', None)
+        result.append({'id': r['id'], 'user_id': r['user_id'], 'username': u['username'] if u else '', 'role': r['role']})
+    return jsonify(result)
+
+# ============ UNDO API ============
+@app.route('/api/log_undo', methods=['POST'])
+def log_undo():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    action_type = data.get('action_type')
+    action_data = data.get('action_data', {})
+    if not action_type: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('undo_log').insert({
+        'user_id': session['user_id'],
+        'action_type': action_type,
+        'action_data': action_data
+    }).execute()
+    return jsonify({'success': True})
+
+@app.route('/api/undo', methods=['POST'])
+def undo_last():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    log = supabase.table('undo_log').select('*').eq('user_id', session['user_id']).order('created_at', desc=True).limit(1).execute().data
+    if not log: return jsonify({'error': 'Nothing to undo'}), 400
+    entry = log[0]
+    action_type = entry['action_type']
+    action_data = entry['action_data']
+    if action_type == 'task_deleted':
+        supabase.table('tasks').insert(action_data).execute()
+    elif action_type == 'task_moved':
+        supabase.table('tasks').update({'list_id': action_data.get('old_list_id')}).eq('id', action_data.get('task_id')).execute()
+    supabase.table('undo_log').delete().eq('id', entry['id']).execute()
+    return jsonify({'success': True, 'action': action_type})
+
+# ============ BULK ACTIONS API ============
+@app.route('/api/bulk_move', methods=['POST'])
+def bulk_move():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_ids = data.get('task_ids', [])
+    new_list_id = data.get('list_id')
+    if not task_ids or not new_list_id: return jsonify({'error': 'Invalid data'}), 400
+    for tid in task_ids:
+        result = supabase.table('tasks').select('position').eq('list_id', new_list_id).order('position', desc=True).limit(1).execute().data
+        max_pos = result[0]['position'] if result else 0
+        supabase.table('tasks').update({'list_id': new_list_id, 'position': max_pos + 1}).eq('id', tid).execute()
+    return jsonify({'success': True, 'moved': len(task_ids)})
+
+@app.route('/api/bulk_delete', methods=['POST'])
+def bulk_delete():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_ids = data.get('task_ids', [])
+    if not task_ids: return jsonify({'error': 'Invalid data'}), 400
+    for tid in task_ids:
+        supabase.table('tasks').delete().eq('id', tid).execute()
+    return jsonify({'success': True, 'deleted': len(task_ids)})
+
+@app.route('/api/bulk_complete', methods=['POST'])
+def bulk_complete():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_ids = data.get('task_ids', [])
+    status = data.get('status', 'completed')
+    if not task_ids: return jsonify({'error': 'Invalid data'}), 400
+    for tid in task_ids:
+        supabase.table('tasks').update({'status': status}).eq('id', tid).execute()
+    return jsonify({'success': True, 'updated': len(task_ids)})
+
+# ============ BOARD THEME API ============
+@app.route('/api/update_theme', methods=['POST'])
+def update_theme():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    board_id = data.get('board_id')
+    theme_color = data.get('theme_color')
+    theme_bg = data.get('theme_bg')
+    if not board_id: return jsonify({'error': 'Invalid data'}), 400
+    updates = {}
+    if theme_color is not None: updates['theme_color'] = theme_color
+    if theme_bg is not None: updates['theme_bg'] = theme_bg
+    if updates:
+        supabase.table('boards').update(updates).eq('id', board_id).execute()
+    return jsonify({'success': True})
+
+# ============ CALENDAR/GANTT DATA API ============
+@app.route('/api/calendar_data/<int:board_id>')
+def calendar_data(board_id):
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    tasks = supabase.table('tasks').select('id, title, due_date, priority, status, assignee_id, list_id, board_lists(name)').eq('board_id', board_id).not_.is_('due_date', 'null').execute().data
+    result = []
+    for t in tasks:
+        li = t.pop('board_lists', None)
+        result.append({
+            'id': t['id'], 'title': t['title'], 'due_date': t['due_date'],
+            'priority': t.get('priority', 'medium'), 'status': t.get('status', 'pending'),
+            'list': li['name'] if li else ''
+        })
+    return jsonify(result)
+
+# ============ REMINDERS API ============
+@app.route('/api/set_reminder', methods=['POST'])
+def set_reminder():
+    if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
+    data = request.get_json()
+    task_id = data.get('task_id')
+    remind_at = data.get('remind_at')
+    message = data.get('message', '')
+    if not task_id or not remind_at: return jsonify({'error': 'Invalid data'}), 400
+    supabase.table('reminders').insert({
+        'task_id': task_id,
+        'remind_at': remind_at,
+        'message': message
+    }).execute()
+    return jsonify({'success': True})
+
 # ============ BOARD / LIST / TASK MANAGEMENT API ============
 
 def is_owner_or_admin(board_id, user_id=None):
@@ -1568,6 +2113,194 @@ def delete_label(label_id):
     if 'user_id' not in session: return jsonify({'error': 'Not logged in'}), 401
     supabase.table('labels').delete().eq('id', label_id).execute()
     return jsonify({'success': True})
+
+@app.route('/calendar/<int:board_id>')
+def calendar_view(board_id):
+    if 'user_id' not in session: return redirect(url_for('login'))
+    board_data = supabase.table('boards').select('*').eq('id', board_id).eq('owner_id', session['user_id']).execute().data
+    if not board_data: return redirect(url_for('boards_page'))
+    board = board_data[0]
+    tasks_raw = supabase.table('tasks').select('*').eq('board_id', board_id).execute().data
+    tasks_json = []
+    for t in tasks_raw:
+        dd = t.get('due_date')
+        if dd:
+            dd_short = dd[:10] if len(dd) >= 10 else dd
+            tasks_json.append({'id': t['id'], 'title': t['title'], 'due_date': dd_short, 'priority': t.get('priority', 'medium'), 'status': t.get('status', 'pending')})
+    return render_template_string('''<!DOCTYPE html><html><head><title>Calendar - {{ board['name'] }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --border: #eee; }
+        [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Poppins',sans-serif; background:var(--bg); color:var(--text); padding:20px; }
+        .cal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+        .cal-header h1 { font-size:24px; }
+        .cal-nav { display:flex; gap:10px; align-items:center; }
+        .cal-nav button { padding:8px 16px; background:var(--card-bg); color:var(--text); border:2px solid var(--border); border-radius:10px; cursor:pointer; font-weight:600; font-family:'Poppins',sans-serif; }
+        .cal-nav span { font-size:18px; font-weight:600; min-width:180px; text-align:center; }
+        .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+        .cal-day-header { padding:8px; text-align:center; font-weight:600; font-size:13px; color:var(--text-secondary); }
+        .cal-day { min-height:100px; background:var(--card-bg); border-radius:10px; padding:8px; border:1px solid var(--border); }
+        .cal-day.today { border-color:#667eea; border-width:2px; }
+        .cal-day.other-month { opacity:0.4; }
+        .cal-day-num { font-weight:600; font-size:13px; margin-bottom:4px; color:var(--text); }
+        .cal-task { padding:3px 8px; border-radius:6px; font-size:11px; font-weight:500; margin-bottom:2px; color:white; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .cal-task.low { background:#34a853; }
+        .cal-task.medium { background:#667eea; }
+        .cal-task.high { background:#ea4335; }
+        .btn-back { padding:8px 16px; background:var(--card-bg); color:var(--text); text-decoration:none; border-radius:10px; border:2px solid var(--border); font-weight:600; font-family:'Poppins',sans-serif; }
+        .dark-toggle { background:var(--card-bg); border:2px solid var(--border); color:var(--text); padding:8px 14px; border-radius:10px; cursor:pointer; font-size:16px; }
+    </style></head><body>
+    <div class="cal-header">
+        <h1>📅 {{ board['name'] }} - Calendar</h1>
+        <div class="cal-nav">
+            <button onclick="changeMonth(-1)">◀</button>
+            <span id="calTitle"></span>
+            <button onclick="changeMonth(1)">▶</button>
+            <button class="dark-toggle" onclick="toggleDark()" id="darkBtn">🌙</button>
+            <a href="/board/{{ board['id'] }}" class="btn-back">← Board</a>
+        </div>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <script>
+    const tasks = {{ tasks_json|tojson }};
+    let viewDate = new Date();
+    function toggleDark() {
+        const isDark = document.documentElement.getAttribute('data-theme')==='dark';
+        document.documentElement.setAttribute('data-theme', isDark?'light':'dark');
+        localStorage.setItem('theme', isDark?'light':'dark');
+        document.getElementById('darkBtn').textContent = isDark?'🌙':'☀️';
+    }
+    (function(){ if(localStorage.getItem('theme')==='dark'){ document.documentElement.setAttribute('data-theme','dark'); document.getElementById('darkBtn').textContent='☀️'; }})();
+    function render() {
+        const y = viewDate.getFullYear(), m = viewDate.getMonth();
+        document.getElementById('calTitle').textContent = viewDate.toLocaleString('default',{month:'long',year:'numeric'});
+        const first = new Date(y,m,1), startDay = first.getDay(), daysInMonth = new Date(y,m+1,0).getDate();
+        const today = new Date(), todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+        const prevDays = new Date(y,m,0).getDate();
+        let html = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>'<div class="cal-day-header">'+d+'</div>').join('');
+        for(let i=0;i<startDay;i++){
+            const d=prevDays-startDay+i+1;
+            html+='<div class="cal-day other-month"><div class="cal-day-num">'+d+'</div></div>';
+        }
+        for(let d=1;d<=daysInMonth;d++){
+            const ds=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+            const isToday=ds===todayStr;
+            html+='<div class="cal-day'+(isToday?' today':'')+'"><div class="cal-day-num">'+d+'</div>';
+            tasks.filter(t=>t.due_date===ds).forEach(t=>{
+                html+='<div class="cal-task '+t.priority+'" title="'+t.title+'">'+t.title+'</div>';
+            });
+            html+='</div>';
+        }
+        const totalCells=startDay+daysInMonth, remaining=totalCells%7===0?0:7-totalCells%7;
+        for(let i=1;i<=remaining;i++){
+            html+='<div class="cal-day other-month"><div class="cal-day-num">'+i+'</div></div>';
+        }
+        document.getElementById('calGrid').innerHTML=html;
+    }
+    function changeMonth(delta){ viewDate.setMonth(viewDate.getMonth()+delta); render(); }
+    render();
+    </script></body></html>''', board=board, tasks_json=tasks_json)
+
+@app.route('/gantt/<int:board_id>')
+def gantt_view(board_id):
+    if 'user_id' not in session: return redirect(url_for('login'))
+    board_data = supabase.table('boards').select('*').eq('id', board_id).eq('owner_id', session['user_id']).execute().data
+    if not board_data: return redirect(url_for('boards_page'))
+    board = board_data[0]
+    lists = supabase.table('board_lists').select('*').eq('board_id', board_id).order('position').execute().data
+    tasks_raw = supabase.table('tasks').select('*').eq('board_id', board_id).order('position').execute().data
+    tasks_json = []
+    for t in tasks_raw:
+        dd = t.get('due_date')
+        if dd:
+            dd_short = dd[:10] if len(dd) >= 10 else dd
+            tasks_json.append({'id': t['id'], 'title': t['title'], 'list_id': t['list_id'], 'due_date': dd_short, 'priority': t.get('priority', 'medium'), 'status': t.get('status', 'pending'), 'created_at': (t.get('created_at',''))[:10]})
+    lists_json = [{'id': l['id'], 'name': l['name']} for l in lists]
+    return render_template_string('''<!DOCTYPE html><html><head><title>Gantt - {{ board['name'] }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --border: #eee; }
+        [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Poppins',sans-serif; background:var(--bg); color:var(--text); padding:20px; }
+        .gantt-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+        .gantt-header h1 { font-size:24px; }
+        .btn-back { padding:8px 16px; background:var(--card-bg); color:var(--text); text-decoration:none; border-radius:10px; border:2px solid var(--border); font-weight:600; font-family:'Poppins',sans-serif; }
+        .dark-toggle { background:var(--card-bg); border:2px solid var(--border); color:var(--text); padding:8px 14px; border-radius:10px; cursor:pointer; font-size:16px; }
+        .gantt-container { overflow-x:auto; background:var(--card-bg); border-radius:16px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.05); }
+        .gantt-table { width:100%; border-collapse:collapse; }
+        .gantt-table th, .gantt-table td { padding:8px 12px; text-align:left; border-bottom:1px solid var(--border); font-size:13px; }
+        .gantt-table th { font-weight:600; color:var(--text-secondary); position:sticky; top:0; background:var(--card-bg); }
+        .gantt-bar { height:24px; border-radius:6px; position:relative; min-width:20px; }
+        .gantt-bar.low { background:#34a853; }
+        .gantt-bar.medium { background:#667eea; }
+        .gantt-bar.high { background:#ea4335; }
+        .gantt-bar.completed { opacity:0.5; }
+        .gantt-timeline { position:relative; height:100%; }
+        .gantt-label { font-weight:500; font-size:13px; white-space:nowrap; max-width:200px; overflow:hidden; text-overflow:ellipsis; }
+        .status-badge { padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; }
+        .status-badge.pending { background:#f3e5f5; color:#6b21a8; }
+        .status-badge.completed { background:#dcfce7; color:#166534; }
+    </style></head><body>
+    <div class="gantt-header">
+        <h1>📊 {{ board['name'] }} - Gantt Chart</h1>
+        <div style="display:flex;gap:10px;align-items:center;">
+            <button class="dark-toggle" onclick="toggleDark()" id="darkBtn">🌙</button>
+            <a href="/board/{{ board['id'] }}" class="btn-back">← Board</a>
+        </div>
+    </div>
+    <div class="gantt-container">
+        <table class="gantt-table">
+            <thead><tr><th style="min-width:200px;">Task</th><th style="min-width:120px;">List</th><th style="min-width:80px;">Priority</th><th style="min-width:90px;">Status</th><th style="min-width:100px;">Start</th><th style="min-width:100px;">Due</th><th style="min-width:300px;">Timeline</th></tr></thead>
+            <tbody id="ganttBody"></tbody>
+        </table>
+    </div>
+    <script>
+    const tasks = {{ tasks_json|tojson }};
+    const lists = {{ lists_json|tojson }};
+    const listMap = {};
+    lists.forEach(l => listMap[l.id] = l.name);
+    function toggleDark() {
+        const isDark = document.documentElement.getAttribute('data-theme')==='dark';
+        document.documentElement.setAttribute('data-theme', isDark?'light':'dark');
+        localStorage.setItem('theme', isDark?'light':'dark');
+        document.getElementById('darkBtn').textContent = isDark?'🌙':'☀️';
+    }
+    (function(){ if(localStorage.getItem('theme')==='dark'){ document.documentElement.setAttribute('data-theme','dark'); document.getElementById('darkBtn').textContent='☀️'; }})();
+    const tasksWithDates = tasks.filter(t => t.due_date);
+    if(tasksWithDates.length === 0) {
+        document.getElementById('ganttBody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-secondary);">No tasks with due dates. Set due dates to see the Gantt chart.</td></tr>';
+    } else {
+        let allDates = [];
+        tasksWithDates.forEach(t => { if(t.created_at) allDates.push(t.created_at); allDates.push(t.due_date); });
+        allDates = allDates.filter(d=>d).sort();
+        const minDate = allDates[0] || new Date().toISOString().slice(0,10);
+        const maxDate = allDates[allDates.length-1] || new Date().toISOString().slice(0,10);
+        const startMs = new Date(minDate).getTime();
+        const endMs = new Date(maxDate).getTime();
+        const range = Math.max(endMs - startMs, 86400000);
+        let html = '';
+        tasksWithDates.forEach(t => {
+            const start = t.created_at || t.due_date;
+            const startPct = Math.max(0, ((new Date(start).getTime() - startMs) / range) * 100);
+            const widthPct = Math.max(2, ((new Date(t.due_date).getTime() - new Date(start).getTime()) / range) * 100);
+            html += '<tr>';
+            html += '<td class="gantt-label">' + t.title + '</td>';
+            html += '<td>' + (listMap[t.list_id]||'') + '</td>';
+            html += '<td><span style="font-weight:600;font-size:12px;">' + t.priority + '</span></td>';
+            html += '<td><span class="status-badge ' + t.status + '">' + t.status + '</span></td>';
+            html += '<td>' + start + '</td>';
+            html += '<td>' + t.due_date + '</td>';
+            html += '<td><div style="position:relative;width:100%;height:24px;"><div class="gantt-bar ' + t.priority + (t.status==='completed'?' completed':'') + '" style="position:absolute;left:' + startPct + '%;width:' + widthPct + '%;"></div></div></td>';
+            html += '</tr>';
+        });
+        document.getElementById('ganttBody').innerHTML = html;
+    }
+    </script></body></html>''', board=board, tasks_json=tasks_json, lists_json=lists_json)
 
 # ============ AUTH ROUTES ============
 
