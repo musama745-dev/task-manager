@@ -289,7 +289,11 @@ def create_board():
 @app.route('/board/<int:board_id>')
 def board_view(board_id):
     if 'user_id' not in session: return redirect(url_for('login'))
-    board_data = supabase.table('boards').select('*').eq('id', board_id).eq('owner_id', session['user_id']).execute().data
+    try:
+        board_data = supabase.table('boards').select('*').eq('id', board_id).eq('owner_id', session['user_id']).execute().data
+    except Exception as e:
+        flash(f'Database error: {e}', 'error')
+        return redirect(url_for('boards_page'))
     if not board_data: return redirect(url_for('boards_page'))
     board = board_data[0]
     lists = supabase.table('board_lists').select('*').eq('board_id', board_id).order('position').execute().data
@@ -384,6 +388,13 @@ def board_view(board_id):
             bs['username'] = u['username'] if u else ''
     except:
         pass
+    try:
+        return _render_board(board, lists, tasks, checklists, labels_by_task, all_labels, attachments_by_task, comments_by_task, all_users, activity_logs, board_shares, deps_by_task)
+    except Exception as e:
+        flash(f'Board render error: {e}', 'error')
+        return redirect(url_for('boards_page'))
+
+def _render_board(board, lists, tasks, checklists, labels_by_task, all_labels, attachments_by_task, comments_by_task, all_users, activity_logs, board_shares, deps_by_task):
     return render_template_string('''
     <!DOCTYPE html>
     <html>
@@ -844,6 +855,14 @@ def board_view(board_id):
         </div>
         <script>
         let addCardListId = null;
+
+        // Ensure all fetch calls send session cookies
+        const _origFetch = window.fetch;
+        window.fetch = function(url, opts) {
+            opts = opts || {};
+            opts.credentials = 'same-origin';
+            return _origFetch(url, opts);
+        };
 
         function openModal(id) { document.getElementById(id).style.display = 'flex'; }
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
@@ -1327,9 +1346,6 @@ def board_view(board_id):
             fetch('/api/set_reminder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task_id:taskId, remind_at:dt, message:msg}) })
             .then(r=>r.json()).then(d=>{ if(d.success) alert('Reminder set!'); else alert('Error: '+d.error); });
         }
-
-        // Real-time polling (every 30s)
-        setInterval(() => { if(!document.hidden) location.reload(); }, 30000);
 
         // @Mentions
         const allUsers = [{% for u in all_users %}{id:{{ u['id'] }},name:'{{ u['username'] }}'}{% if not loop.last %},{% endif %}{% endfor %}];
