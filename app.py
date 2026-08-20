@@ -34,18 +34,17 @@ except Exception as e:
     _posthog_available = False
 
 def track_event(distinct_id, event, properties=None):
-    """Safely track a PostHog event (non-blocking)."""
-    if not _posthog_available:
+    """Safely track a PostHog event."""
+    if not _posthog_available or not posthog_client:
         return
     try:
         props = dict(properties or {})
-        props.setdefault('$ip', request.remote_addr or '')
-        threading.Thread(
-            target=posthog_client.capture,
-            args=(str(distinct_id), event),
-            kwargs={'properties': props},
-            daemon=True
-        ).start()
+        try:
+            props.setdefault('$ip', request.remote_addr or '')
+        except RuntimeError:
+            pass
+        posthog_client.capture(str(distinct_id), event, properties=props)
+        posthog_client.flush()
     except Exception as e:
         print(f"posthog track warning: {e}")
 
