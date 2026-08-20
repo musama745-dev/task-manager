@@ -295,10 +295,14 @@ def board_view(board_id):
     board = board_data[0]
     lists = supabase.table('board_lists').select('*').eq('board_id', board_id).order('position').execute().data
     # Get tasks with user info
-    tasks_raw = supabase.table('tasks').select('*, users(username)').eq('board_id', board_id).order('position').execute().data
+    tasks_raw = []
+    try:
+        tasks_raw = supabase.table('tasks').select('*, users(username)').eq('board_id', board_id).order('position').execute().data
+    except:
+        tasks_raw = supabase.table('tasks').select('*').eq('board_id', board_id).order('position').execute().data
     tasks = []
     for t in tasks_raw:
-        user_info = t.pop('users', None)
+        user_info = t.pop('users', None) if isinstance(t.get('users'), dict) else None
         t['users_username'] = user_info['username'] if user_info else ''
         tasks.append(t)
     # Batch fetch checklists, labels, attachments
@@ -307,27 +311,51 @@ def board_view(board_id):
     labels_by_task = {tid: [] for tid in task_ids}
     attachments_by_task = {tid: [] for tid in task_ids}
     if task_ids:
-        all_cl = supabase.table('checklists').select('*').in_('task_id', task_ids).execute().data
-        for cl in all_cl:
-            checklists[cl['task_id']].append(cl)
-        all_tl = supabase.table('task_labels').select('task_id, labels(*)').in_('task_id', task_ids).execute().data
-        for tl in all_tl:
-            label_info = tl.get('labels')
-            if label_info:
-                labels_by_task[tl['task_id']].append(label_info)
-        all_att = supabase.table('attachments').select('*').in_('task_id', task_ids).order('uploaded_at', desc=True).execute().data
-        for att in all_att:
-            attachments_by_task[att['task_id']].append(att)
+        try:
+            all_cl = supabase.table('checklists').select('*').in_('task_id', task_ids).execute().data
+            for cl in all_cl:
+                checklists[cl['task_id']].append(cl)
+        except:
+            pass
+        try:
+            all_tl = supabase.table('task_labels').select('task_id, labels(*)').in_('task_id', task_ids).execute().data
+            for tl in all_tl:
+                label_info = tl.get('labels')
+                if label_info:
+                    labels_by_task[tl['task_id']].append(label_info)
+        except:
+            pass
+        try:
+            all_att = supabase.table('attachments').select('*').in_('task_id', task_ids).order('uploaded_at', desc=True).execute().data
+            for att in all_att:
+                attachments_by_task[att['task_id']].append(att)
+        except:
+            pass
     # Fetch comments for all tasks
     comments_by_task = {tid: [] for tid in task_ids}
     if task_ids:
-        all_cm = supabase.table('comments').select('*, users(username)').in_('task_id', task_ids).order('created_at').execute().data
-        for cm in all_cm:
-            u = cm.pop('users', None)
-            cm['username'] = u['username'] if u else ''
-            comments_by_task[cm['task_id']].append(cm)
-    all_labels = supabase.table('labels').select('*').execute().data
-    all_users = supabase.table('users').select('id, username').execute().data
+        try:
+            all_cm = supabase.table('comments').select('*').in_('task_id', task_ids).order('created_at').execute().data
+            for cm in all_cm:
+                cm['username'] = ''
+                try:
+                    u = supabase.table('users').select('username').eq('id', cm['user_id']).execute().data
+                    if u: cm['username'] = u[0]['username']
+                except:
+                    pass
+                comments_by_task[cm['task_id']].append(cm)
+        except:
+            pass
+    all_labels = []
+    try:
+        all_labels = supabase.table('labels').select('*').execute().data
+    except:
+        pass
+    all_users = []
+    try:
+        all_users = supabase.table('users').select('id, username').execute().data
+    except:
+        pass
     # Fetch dependencies
     deps_by_task = {tid: [] for tid in task_ids}
     if task_ids:
