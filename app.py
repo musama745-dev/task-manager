@@ -195,6 +195,7 @@ def boards_page():
                     <span class="user-info">👤 {{ user['username'] }}</span>
                     {% if user['role'] == 'admin' %}
                     <a href="/login-log" class="btn-logout">📊 Login Activity</a>
+                    <a href="/setup" class="btn-logout">⚙️ Setup</a>
                     {% endif %}
                     <a href="/logout" class="btn-logout">Logout</a>
                 </div>
@@ -1532,19 +1533,22 @@ def add_list():
     board_id = data.get('board_id')
     name = data.get('name', '').strip()
     if not board_id or not name: return jsonify({'error': 'Invalid data'}), 400
-    result = supabase.table('board_lists').select('position').eq('board_id', board_id).order('position', desc=True).limit(1).execute().data
-    max_pos = result[0]['position'] if result else 0
-    supabase.table('board_lists').insert({
-        'board_id': board_id,
-        'name': name,
-        'position': max_pos + 1
-    }).execute()
-    track_event(session['user_id'], 'list_created', {
-        'list_name': name,
-        'board_id': board_id
-    })
-    log_activity(board_id, 'list_created', name)
-    return jsonify({'success': True})
+    try:
+        result = supabase.table('board_lists').select('position').eq('board_id', board_id).order('position', desc=True).limit(1).execute().data
+        max_pos = result[0]['position'] if result else 0
+        supabase.table('board_lists').insert({
+            'board_id': board_id,
+            'name': name,
+            'position': max_pos + 1
+        }).execute()
+        track_event(session['user_id'], 'list_created', {
+            'list_name': name,
+            'board_id': board_id
+        })
+        log_activity(board_id, 'list_created', name)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/add_card', methods=['POST'])
 def add_card():
@@ -1553,25 +1557,28 @@ def add_card():
     list_id = data.get('list_id')
     title = data.get('title', '').strip()
     if not list_id or not title: return jsonify({'error': 'Invalid data'}), 400
-    board_data = supabase.table('board_lists').select('board_id').eq('id', list_id).execute().data
-    if not board_data: return jsonify({'error': 'List not found'}), 404
-    result = supabase.table('tasks').select('position').eq('list_id', list_id).order('position', desc=True).limit(1).execute().data
-    max_pos = result[0]['position'] if result else 0
-    supabase.table('tasks').insert({
-        'board_id': board_data[0]['board_id'],
-        'list_id': list_id,
-        'user_id': session['user_id'],
-        'title': title,
-        'description': data.get('description'),
-        'position': max_pos + 1
-    }).execute()
-    track_event(session['user_id'], 'task_created', {
-        'title': title,
-        'list_id': list_id,
-        'board_id': board_data[0]['board_id']
-    })
-    log_activity(board_data[0]['board_id'], 'task_created', title)
-    return jsonify({'success': True})
+    try:
+        board_data = supabase.table('board_lists').select('board_id').eq('id', list_id).execute().data
+        if not board_data: return jsonify({'error': 'List not found'}), 404
+        result = supabase.table('tasks').select('position').eq('list_id', list_id).order('position', desc=True).limit(1).execute().data
+        max_pos = result[0]['position'] if result else 0
+        supabase.table('tasks').insert({
+            'board_id': board_data[0]['board_id'],
+            'list_id': list_id,
+            'user_id': session['user_id'],
+            'title': title,
+            'description': data.get('description'),
+            'position': max_pos + 1
+        }).execute()
+        track_event(session['user_id'], 'task_created', {
+            'title': title,
+            'list_id': list_id,
+            'board_id': board_data[0]['board_id']
+        })
+        log_activity(board_data[0]['board_id'], 'task_created', title)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/move_task', methods=['POST'])
 def move_task():
@@ -2524,6 +2531,75 @@ def logout():
     session.clear()
     flash('Logged out successfully!', 'success')
     return redirect(url_for('login'))
+
+@app.route('/setup')
+def setup_page():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    user_data = supabase.table('users').select('role').eq('id', session['user_id']).execute().data
+    if not user_data or user_data[0].get('role') != 'admin':
+        flash('Admin only!', 'error')
+        return redirect(url_for('boards_page'))
+    results = {}
+    table_names = ['time_entries','task_dependencies','task_templates','board_roles','undo_log','reminders','login_logs']
+    for name in table_names:
+        try:
+            supabase.table(name).select('id').limit(1).execute()
+            results[name] = True
+        except:
+            results[name] = False
+    sql_text = open(os.path.join(os.path.dirname(__file__), 'new_tables.sql'), 'r').read() if os.path.exists(os.path.join(os.path.dirname(__file__), 'new_tables.sql')) else '-- new_tables.sql not found'
+    return render_template_string('''<!DOCTYPE html><html><head>
+        <title>Setup - Task Manager</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            *{margin:0;padding:0;box-sizing:border-box}
+            body{font-family:'Poppins',sans-serif;background:#f0f2f5;padding:30px;color:#333}
+            .container{max-width:700px;margin:auto}
+            h1{font-size:28px;margin-bottom:20px}
+            .card{background:white;border-radius:16px;padding:25px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-bottom:15px}
+            .table-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #eee}
+            .table-row:last-child{border-bottom:none}
+            .badge-ok{background:#dcfce7;color:#166534;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+            .badge-missing{background:#fee2e2;color:#991b2b;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+            .btn{padding:12px 24px;border:none;border-radius:12px;cursor:pointer;font-weight:600;font-family:'Poppins',sans-serif;font-size:14px;text-decoration:none;display:inline-block;margin-top:10px}
+            .btn-primary{background:linear-gradient(135deg,#667eea,#764ba2);color:white}
+            .btn-copy{background:#27ae60;color:white}
+            .btn-back{background:#ea4335;color:white}
+            .sql-box{background:#1e1e2e;color:#cdd6f4;border-radius:12px;padding:16px;font-family:monospace;font-size:12px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:15px}
+            .steps{margin:15px 0;line-height:1.8}
+            .steps li{margin-bottom:8px}
+        </style>
+    </head><body>
+        <div class="container">
+            <h1>Setup - Database Tables</h1>
+            <div class="card">
+                <p style="margin-bottom:15px;color:#5e6c84;font-weight:600;">Table Status:</p>
+                {% for name, exists in results.items() %}
+                <div class="table-row">
+                    <span style="font-weight:500;">{{ name }}</span>
+                    {% if exists %}
+                    <span class="badge-ok">OK</span>
+                    {% else %}
+                    <span class="badge-missing">MISSING</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <div class="card">
+                <p style="font-weight:600;margin-bottom:10px;">How to fix (takes 30 seconds):</p>
+                <ol class="steps">
+                    <li>Click <strong>Copy SQL</strong> below</li>
+                    <li>Go to <a href="https://supabase.com/dashboard" target="_blank">Supabase Dashboard</a> &rarr; your project &rarr; <strong>SQL Editor</strong></li>
+                    <li>Paste and click <strong>Run</strong></li>
+                    <li>Refresh this page to verify</li>
+                </ol>
+                <button class="btn btn-copy" onclick="navigator.clipboard.writeText(document.getElementById('sqlText').textContent).then(()=>this.textContent='Copied!')">Copy SQL</button>
+                <div class="sql-box" id="sqlText">{{ sql_text }}</div>
+            </div>
+            <a href="/boards" class="btn btn-back">Back to Boards</a>
+        </div>
+    </body></html>''', results=results, sql_text=sql_text, posthog_snippet=POSTHOG_SNIPPET)
 
 @app.route('/login-log')
 def login_log():
