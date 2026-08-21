@@ -184,7 +184,7 @@ def boards_page():
             .modal-close { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: #999; transition: 0.3s; }
             .modal-close:hover { color: #333; }
         </style>
-        {{ posthog_snippet }}
+        {{ posthog_snippet|safe }}
     </head>
     <body>
         <div class="container">
@@ -511,7 +511,7 @@ def _render_board(board, lists, tasks, checklists, labels_by_task, all_labels, a
             .dependency-tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:600; background:#fff3e0; color:#e65100; margin:2px 0; }
             .bulk-checkbox { width:16px; height:16px; accent-color:#667eea; cursor:pointer; margin-right:6px; }
         </style>
-        {{ posthog_snippet }}
+        {{ posthog_snippet|safe }}
     </head>
     <body>
         <div class="container">
@@ -2180,7 +2180,7 @@ def calendar_view(board_id):
     return render_template_string('''<!DOCTYPE html><html><head><title>Calendar - {{ board['name'] }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    {{ posthog_snippet }}
+    {{ posthog_snippet|safe }}
     <style>
         :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --border: #eee; }
         [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
@@ -2273,7 +2273,7 @@ def gantt_view(board_id):
     return render_template_string('''<!DOCTYPE html><html><head><title>Gantt - {{ board['name'] }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    {{ posthog_snippet }}
+    {{ posthog_snippet|safe }}
     <style>
         :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --border: #eee; }
         [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
@@ -2583,7 +2583,7 @@ def login_log():
             .table-scroll { overflow-x: auto; }
             @media (max-width: 600px) { th, td { font-size: 12px; padding: 8px; } }
         </style>
-        {{ posthog_snippet }}
+        {{ posthog_snippet|safe }}
     </head>
     <body>
         <div class="container">
