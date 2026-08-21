@@ -28,8 +28,9 @@ try:
     from posthog import Posthog
     posthog_client = Posthog(project_api_key=POSTHOG_API_KEY, host=POSTHOG_HOST)
     _posthog_available = True
+    print(f"posthog init OK: key={POSTHOG_API_KEY[:8]}... host={POSTHOG_HOST}")
 except Exception as e:
-    print(f"posthog init warning: {e}")
+    print(f"posthog init FAIL: {e}")
     posthog_client = None
     _posthog_available = False
 
@@ -43,7 +44,7 @@ def track_event(distinct_id, event, properties=None):
             props.setdefault('$ip', request.remote_addr or '')
         except RuntimeError:
             pass
-        posthog_client.capture(str(distinct_id), event, properties=props)
+        posthog_client.capture(distinct_id=str(distinct_id), event=event, properties=props)
         posthog_client.flush()
     except Exception as e:
         print(f"posthog track warning: {e}")
