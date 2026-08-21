@@ -82,6 +82,26 @@ supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+@app.route('/debug')
+def debug_route():
+    info = {
+        'supabase_url_set': bool(SUPABASE_URL),
+        'supabase_key_set': bool(SUPABASE_KEY),
+        'supabase_url_prefix': SUPABASE_URL[:30] if SUPABASE_URL else 'NOT SET',
+        'supabase_client_ok': supabase is not None,
+        'secret_key_set': bool(os.environ.get('SECRET_KEY', '')),
+    }
+    if supabase:
+        try:
+            r = supabase.table('users').select('id').limit(1).execute()
+            info['db_connection'] = 'OK'
+            info['users_exist'] = len(r.data) > 0
+        except Exception as e:
+            info['db_connection'] = f'FAIL: {e}'
+    else:
+        info['db_connection'] = 'NO CLIENT'
+    return jsonify(info)
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx', 'txt', 'xlsx', 'pptx'}
 
 def allowed_file(filename):
