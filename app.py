@@ -9,6 +9,10 @@ from datetime import date, datetime
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', '') or 'task_manager_secret_key_12345'
 
+# PostHog frontend snippet
+POSTHOG_SNIPPET = '''<script>!function(t,e){var o,n,p,r;e.__SV||(window.posthog&&window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}p||((p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",p.onerror=function(){p=null},(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r));var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture register register_once register_for_session unregister unregister_for_session identify setPersonProperties unsetPersonProperties group setGroupPropertiesForFlags resetGroupPropertiesForFlags set_config startSessionRecording stopSessionRecording sessionRecordingStarted get_feature_flag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey canRenderSurvey canRenderSurveyAsync getNextSurveyStep createPersonProfile setInternalOrTestUser opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId captureException".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+posthog.init('phc_ojVvZZtHsDWrjqczHK6AL3sJvxDCDgSwAaUFVSvAR7L5',{api_host:'https://us.i.posthog.com',defaults:'2026-05-30',person_profiles:'identified_only'})</script>'''
+
 # ============ SUPABASE SETUP ============
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -180,6 +184,7 @@ def boards_page():
             .modal-close { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: #999; transition: 0.3s; }
             .modal-close:hover { color: #333; }
         </style>
+        {{ posthog_snippet }}
     </head>
     <body>
         <div class="container">
@@ -256,7 +261,7 @@ def boards_page():
         </script>
     </body>
     </html>
-    ''', user=user, boards=boards)
+    ''', user=user, boards=boards, posthog_snippet=POSTHOG_SNIPPET)
 
 @app.route('/api/create_board', methods=['POST'])
 def create_board():
@@ -506,6 +511,7 @@ def _render_board(board, lists, tasks, checklists, labels_by_task, all_labels, a
             .dependency-tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:600; background:#fff3e0; color:#e65100; margin:2px 0; }
             .bulk-checkbox { width:16px; height:16px; accent-color:#667eea; cursor:pointer; margin-right:6px; }
         </style>
+        {{ posthog_snippet }}
     </head>
     <body>
         <div class="container">
@@ -1373,7 +1379,7 @@ def _render_board(board, lists, tasks, checklists, labels_by_task, all_labels, a
         </script>
     </body>
     </html>
-    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, comments_by_task=comments_by_task, all_users=all_users, activity_logs=activity_logs, board_shares=board_shares, today=date.today().isoformat(), deps_by_task=deps_by_task)
+    ''', board=board, lists=lists, tasks=tasks, checklists=checklists, labels_by_task=labels_by_task, all_labels=all_labels, attachments_by_task=attachments_by_task, comments_by_task=comments_by_task, all_users=all_users, activity_logs=activity_logs, board_shares=board_shares, today=date.today().isoformat(), deps_by_task=deps_by_task, posthog_snippet=POSTHOG_SNIPPET)
 
 # ============ ACTIVITY LOG HELPER ============
 def log_activity(board_id, action, details=''):
@@ -2174,6 +2180,7 @@ def calendar_view(board_id):
     return render_template_string('''<!DOCTYPE html><html><head><title>Calendar - {{ board['name'] }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    {{ posthog_snippet }}
     <style>
         :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --border: #eee; }
         [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
@@ -2246,7 +2253,7 @@ def calendar_view(board_id):
     }
     function changeMonth(delta){ viewDate.setMonth(viewDate.getMonth()+delta); render(); }
     render();
-    </script></body></html>''', board=board, tasks_json=tasks_json)
+    </script></body></html>''', board=board, tasks_json=tasks_json, posthog_snippet=POSTHOG_SNIPPET)
 
 @app.route('/gantt/<int:board_id>')
 def gantt_view(board_id):
@@ -2266,6 +2273,7 @@ def gantt_view(board_id):
     return render_template_string('''<!DOCTYPE html><html><head><title>Gantt - {{ board['name'] }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    {{ posthog_snippet }}
     <style>
         :root { --bg: #f0f2f5; --card-bg: white; --text: #333; --text-secondary: #5e6c84; --border: #eee; }
         [data-theme="dark"] { --bg: #1a1a2e; --card-bg: #16213e; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #333; }
@@ -2344,7 +2352,7 @@ def gantt_view(board_id):
         });
         document.getElementById('ganttBody').innerHTML = html;
     }
-    </script></body></html>''', board=board, tasks_json=tasks_json, lists_json=lists_json)
+    </script></body></html>''', board=board, tasks_json=tasks_json, lists_json=lists_json, posthog_snippet=POSTHOG_SNIPPET)
 
 # ============ AUTH ROUTES ============
 
@@ -2575,6 +2583,7 @@ def login_log():
             .table-scroll { overflow-x: auto; }
             @media (max-width: 600px) { th, td { font-size: 12px; padding: 8px; } }
         </style>
+        {{ posthog_snippet }}
     </head>
     <body>
         <div class="container">
@@ -2631,11 +2640,12 @@ def login_log():
         </div>
     </body>
     </html>
-    ''', logs=logs, count_rows=count_rows, setup_needed=setup_needed)
+    ''', logs=logs, count_rows=count_rows, setup_needed=setup_needed, posthog_snippet=POSTHOG_SNIPPET)
 
 LOGIN_PAGE = '''
 <!DOCTYPE html>
 <html><head><title>Login</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<script>!function(t,e){var o,n,p,r;e.__SV||(window.posthog&&window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}p||((p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",p.onerror=function(){p=null},(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r));var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture register register_once register_for_session unregister unregister_for_session identify setPersonProperties unsetPersonProperties group setGroupPropertiesForFlags resetGroupPropertiesForFlags set_config startSessionRecording stopSessionRecording sessionRecordingStarted get_feature_flag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey canRenderSurvey canRenderSurveyAsync getNextSurveyStep createPersonProfile setInternalOrTestUser opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId captureException".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);posthog.init('phc_ojVvZZtHsDWrjqczHK6AL3sJvxDCDgSwAaUFVSvAR7L5',{api_host:'https://us.i.posthog.com',defaults:'2026-05-30',person_profiles:'identified_only'})</script>
 <style>body{font-family:'Poppins',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login-box{background:white;padding:40px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,0.1);max-width:400px;width:90%}h1{color:#1a73e8;text-align:center}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:8px}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer}.links{text-align:center;margin-top:20px}.flash{padding:12px;border-radius:8px;margin-bottom:15px}.flash-success{background:#e6f4ea;color:#137333}.flash-error{background:#fce8e6;color:#c5221f}</style></head>
 <body><div class="login-box"><h1>📋 Task Manager</h1><p style="text-align:center;color:#5f6368;">Login to manage your boards</p>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
@@ -2646,6 +2656,7 @@ LOGIN_PAGE = '''
 REGISTER_PAGE = '''
 <!DOCTYPE html>
 <html><head><title>Register</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<script>!function(t,e){var o,n,p,r;e.__SV||(window.posthog&&window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}p||((p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",p.onerror=function(){p=null},(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r));var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture register register_once register_for_session unregister unregister_for_session identify setPersonProperties unsetPersonProperties group setGroupPropertiesForFlags resetGroupPropertiesForFlags set_config startSessionRecording stopSessionRecording sessionRecordingStarted get_feature_flag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey canRenderSurvey canRenderSurveyAsync getNextSurveyStep createPersonProfile setInternalOrTestUser opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId captureException".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);posthog.init('phc_ojVvZZtHsDWrjqczHK6AL3sJvxDCDgSwAaUFVSvAR7L5',{api_host:'https://us.i.posthog.com',defaults:'2026-05-30',person_profiles:'identified_only'})</script>
 <style>body{font-family:'Poppins',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.register-box{background:white;padding:40px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,0.1);max-width:400px;width:90%}h1{color:#1a73e8;text-align:center}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:8px}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:8px;cursor:pointer}.links{text-align:center;margin-top:20px}.flash{padding:12px;border-radius:8px;margin-bottom:15px}.flash-success{background:#e6f4ea;color:#137333}.flash-error{background:#fce8e6;color:#c5221f}</style></head>
 <body><div class="register-box"><h1>📋 Task Manager</h1><p style="text-align:center;color:#5f6368;">Create a new account</p>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
